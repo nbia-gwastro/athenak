@@ -51,12 +51,8 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
 
   // read parameters from input file
   MeshBlockPack *pmbp = pmy_mesh_->pmb_pack;
-  EOS_Data &eos = pmbp->pmhd->peos->eos_data;
   Real d0 = pin->GetReal("problem", "d0");
   Real p0 = 1.0;
-  if (eos.is_ideal) {
-    p0 = pin->GetReal("problem", "p0");
-  }
   Real amp = pin->GetReal("problem", "amp");
   int ipert = pin->GetInteger("problem", "ipert");
   Real kx, ky, kz;
@@ -88,13 +84,21 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
   auto &size = pmbp->pmb->mb_size;
 
   if (pmbp->phydro != nullptr) {
+    EOS_Data &eos = pmbp->phydro->peos->eos_data;
+    if (eos.is_ideal) {
+      p0 = pin->GetReal("problem", "p0");
+    }
+    Real gm1 = eos.gamma - 1.0;
+    auto u0 = pmbp->phydro->u0;
+    Real omega0 = pmbp->phydro->psrc->omega0;
+
     if (pmbp->phydro->psrc == nullptr) {
       std::cout << "### FATAL ERROR in " << __FILE__ << " at line " << __LINE__
                 << std::endl
                 << "Shearing box source terms are not enabled." << std::endl;
       exit(EXIT_FAILURE);
     }
-    if (!pmbp->phydro->shearing_box) {
+    if (!pmbp->phydro->psrc->shearing_box) {
       std::cout << "### FATAL ERROR in " << __FILE__ << " at line " << __LINE__
                 << std::endl
                 << "shwave problem generator only works in shearing box"
@@ -102,7 +106,7 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
       exit(EXIT_FAILURE);
     }
     if (ipert == 1) {
-      Real rvx = 0.1*iso_cs;
+      Real rvx = 0.1*eos.iso_cs;
       par_for("shwave1_c", DevExeSpace(), 0,(pmbp->nmb_thispack-1),ks,ke,js,je,is,ie,
       KOKKOS_LAMBDA(int m, int k, int j, int i) {
         u0(m,IDN,k,j,i) = d0;
@@ -114,10 +118,21 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
         }
       });
     } else if (ipert == 2) {
-      Real rvx = amp*iso_cs*std::cos(kx*x1 + ky*x2);
-      Real rvy = amp*iso_cs*(ky/kx)*std::cos(kx*x1 + ky*x2);
       par_for("shwave2_c", DevExeSpace(), 0,(pmbp->nmb_thispack-1),ks,ke,js,je,is,ie,
       KOKKOS_LAMBDA(int m, int k, int j, int i) {
+        Real &x1min = size.d_view(m).x1min;
+        Real &x1max = size.d_view(m).x1max;
+        int nx1 = indcs.nx1;
+        Real x1v = CellCenterX(i-is, nx1, x1min, x1max);
+  
+        Real &x2min = size.d_view(m).x2min;
+        Real &x2max = size.d_view(m).x2max;
+        int nx2 = indcs.nx2;
+        Real x2v = CellCenterX(j-js, nx2, x2min, x2max);
+  
+        Real rvx = amp*eos.iso_cs*std::cos(kx*x1v + ky*x2v);
+        Real rvy = amp*eos.iso_cs*(ky/kx)*std::cos(kx*x1v + ky*x2v);
+
         u0(m,IDN,k,j,i) = d0;
         u0(m,IM1,k,j,i) = -d0*rvx;
         u0(m,IM2,k,j,i) = -d0*rvy;
@@ -141,7 +156,7 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
                 << "Shearing box source terms are not enabled." << std::endl;
       exit(EXIT_FAILURE);
     }
-    if (!pmbp->pmhd->shearing_box) {
+    if (!pmbp->pmhd->psrc->shearing_box) {
       std::cout << "### FATAL ERROR in " << __FILE__ << " at line " << __LINE__
                 << std::endl
                 << "jgg problem generator only works in shearing box"
@@ -155,10 +170,14 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
       exit(EXIT_FAILURE);
     }
     // Initialize conserved variables in MHD
+    EOS_Data &eos = pmbp->pmhd->peos->eos_data;
+    if (eos.is_ideal) {
+      p0 = pin->GetReal("problem", "p0");
+    }
     Real gm1 = eos.gamma - 1.0;
     auto u0 = pmbp->pmhd->u0;
     auto b0 = pmbp->pmhd->b0;
-    Real omega0 = pmbp->pmhd->psb->omega0;
+    Real omega0 = pmbp->pmhd->psrc->omega0;
 
     Real B02 = p0/beta;
     Real k2 = SQR(kx)+SQR(ky)+SQR(kz);
