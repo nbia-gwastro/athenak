@@ -179,9 +179,9 @@ namespace {
     const Buffer buffer_ = buffer;
     const DiskModel disk_ = disk;
     const PointMass central_mass_ = central_mass;
+    const bool is_ideal = pm->pmb_pack->phydro->peos->eos_data.is_ideal;
     par_for("central-potential", DevExeSpace(), 0, nmb1, ks, ke, js, je, is, ie,
     KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
-      bool is_ideal = pm->pmb_pack->phydro->peos->eos_data.is_ideal;
       Real &x1min = size.d_view(m).x1min;
       Real &x1max = size.d_view(m).x1max;
       Real &x2min = size.d_view(m).x2min;
@@ -268,6 +268,7 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
   // Initialize disk using Kokkos parallel loop
   const DiskModel disk_ = disk;
   const PointMass central_mass_ = central_mass;
+  const bool is_ideal = pmbp->phydro->peos->eos_data.is_ideal;
   par_for("pgen_keplerian_disk", DevExeSpace(), 0, (pmbp->nmb_thispack - 1), ks, ke, js, je, is, ie,
   KOKKOS_LAMBDA(int m, int k, int j, int i) {
     Real &x1min = size.d_view(m).x1min;
@@ -301,7 +302,7 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
     u0_(m, IM1, k, j, i) = prim0[0] * prim0[1];
     u0_(m, IM2, k, j, i) = prim0[0] * prim0[2];
     u0_(m, IM3, k, j, i) = 0.0;
-    if (pmbp->phydro->peos->eos_data.is_ideal) {
+    if (is_ideal) {
       u0_(m, IEN, k, j, i) = prim0[0] * prim0[4] / (pmbp->phydro->peos->eos_data.gamma - 1.0) + 0.5 * prim0[0] * (prim0[1] * prim0[1] + prim0[2] * prim0[2]);
     }
   });
