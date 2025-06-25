@@ -64,6 +64,8 @@ Driver::Driver(ParameterInput *pin, Mesh *pmesh, Real wtlim, Kokkos::Timer* ptim
   lb_efficiency_(0),
   pwall_clock_(ptimer),
   wall_time(wtlim),
+  last_diag_cycle(0),
+  last_diag_time(0.0),
   impl_src("ru",1,1,1,1,1,1) {
   // set time-evolution option (no default)
   {
@@ -522,17 +524,44 @@ void Driver::Finalize(Mesh *pmesh, ParameterInput *pin, Outputs *pout) {
 //! \fn Driver::OutputCycleDiagnostics()
 //! \brief Simple function to print diagnostics every 'ndiag' cycles to stdout
 
+// void Driver::OutputCycleDiagnostics(Mesh *pm) {
+// //  const int dtprcsn = std::numeric_limits<Real>::max_digits10 - 1;
+//   const int dtprcsn = 6;
+//   if (pm->ncycle % ndiag == 0) {
+//     Real elapsed = pwall_clock_->seconds();
+//     std::cout << "elapsed=" << std::scientific << std::setprecision(dtprcsn) << elapsed
+//               << " cycle=" << pm->ncycle
+//               << " time=" << pm->time << " dt=" << pm->dt << std::endl;
+//   }
+//   return;
+// }
+
 void Driver::OutputCycleDiagnostics(Mesh *pm) {
-//  const int dtprcsn = std::numeric_limits<Real>::max_digits10 - 1;
-  const int dtprcsn = 6;
+  const int dtprcsn = 2;
   if (pm->ncycle % ndiag == 0) {
-    Real elapsed = pwall_clock_->seconds();
-    std::cout << "elapsed=" << std::scientific << std::setprecision(dtprcsn) << elapsed
-              << " cycle=" << pm->ncycle
-              << " time=" << pm->time << " dt=" << pm->dt << std::endl;
+    Real current_time = pwall_clock_->seconds();
+    int delta_cycles = pm->ncycle - last_diag_cycle;
+    Real delta_time = current_time - last_diag_time;
+
+    // Compute Megazones per second (Mzps)
+    std::uint64_t total_zones = static_cast<std::uint64_t>(
+      pm->nmb_total * pm->NumberOfMeshBlockCells());
+    double mzps = (delta_time > 0.0)
+      ? static_cast<double>(total_zones * delta_cycles) / delta_time / 1.0e6
+      : 0.0;
+
+    // std::cout << "elapsed=" << std::scientific << std::setprecision(dtprcsn) << current_time
+    std::cout << "cycle=" << std::right << std::setw(4) << pm->ncycle
+          << "  time=" << std::scientific << std::setprecision(dtprcsn) << pm->time
+          << "  dt="   << pm->dt
+          << "  Mzps="  << std::fixed << mzps
+          << std::endl;
+
+    last_diag_cycle = pm->ncycle;
+    last_diag_time = current_time;
   }
-  return;
 }
+
 
 //----------------------------------------------------------------------------------------
 //! \fn Driver::UpdateWallClock()

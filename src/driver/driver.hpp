@@ -48,6 +48,10 @@ class Driver {
   Kokkos::Timer* pwall_clock_;     // timer for tracking the wall clock
   Real wall_time;
 
+  // For performance printing
+  int last_diag_cycle;
+  Real last_diag_time;
+
   // functions
   void ExecuteTaskList(Mesh *pm, std::string tl, int stage);
   void Initialize(Mesh *pmesh, ParameterInput *pin, Outputs *pout, bool rflag);
