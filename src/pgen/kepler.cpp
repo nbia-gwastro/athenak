@@ -14,7 +14,7 @@
 #include "hydro/hydro.hpp"
 #include "pgen.hpp"
 
-#define NDIM 3
+#define NDIMS 3
 #define NCONS 5
 
 // ----------------------------------------------------------------------------
@@ -41,38 +41,39 @@ namespace {
   struct DiskModel{
     Real rho0;
     Real p0;
+    Real rcav;
+    Real fluff;
   };
 
   Real GM;
   Real rs;
   Real rho0;
   Real p0;
+  Real rcav;
+  Real fluff;
   Buffer buffer;
-  PointMass central_mass;
   DiskModel disk;
-
+  PointMass central_mass;
   void UserSourceTerms(Mesh *pm, const Real dt);
-
-  // Also might need to capture gloval variables into KOKKOS_LAMBDAs with Kokkos::View
 }
 
 // ----------------------------------------------------------------------------
 namespace {
   KOKKOS_INLINE_FUNCTION
-  void InitializePrims(const Real *coord, const PointMass &p, const DiskModel &disk, Real *prim) {
+  void InitializePrims(
+    const Real *coord, 
+    const PointMass &p, 
+    const DiskModel &disk, 
+    Real *prim) 
+  {
     Real x = coord[0];
     Real y = coord[1];
     Real r = sqrt(x * x + y * y);
     Real rsoft = sqrt(r * r + p.rs * p.rs);
     Real vphi = sqrt(p.mass / rsoft);
     Real vx = -vphi * (y / r);
-    Real vy =  vphi * (x / r);
-
-    Real fluff = 1e-5;
-    Real rcav = 3.0;    // TODO: Make these things input parameters
-    Real rout = 7.0;
-    Real fcav = fluff + (1. - fluff) * exp(-pow(r / rcav, -4));
-    Real fout = 1. - (fluff + (1. - fluff) * exp(-pow(r / rout, -12)));
+    Real vy =  vphi * (x / r);   
+    Real fcav = disk.fluff + (1. - disk.fluff) * exp(-pow(r / disk.rcav, -4));
 
     prim[0] = disk.rho0; // * fout;
     prim[1] = vx;
@@ -81,35 +82,18 @@ namespace {
     prim[4] = disk.p0;
     return;
   }
-
-  // void InitializeCons(const Coordinate &coord, Conserved *cons, Real gamma) {
-  //   Real r = sqrt(coord.x * coord.x + coord.y * coord.y);
-  //   Real rsoft = sqrt(r * r + rs * rs);
-  //   Real vphi = sqrt(GM / rsoft);
-  //   Real vx = -vphi * (coord.y / r);
-  //   Real vy =  vphi * (coord.x / r);
-
-  //   Real fluff = 1e-5;
-  //   Real rcav = 3.0;    // TODO: Make these things input parameters
-  //   Real rout = 7.0;
-  //   Real fcav = fluff + (1. - fluff) * exp(-pow(r / rcav, -4));
-  //   Real fout = 1. - (fluff + (1. - fluff) * exp(-pow(r / rout, -12)));
-
-  //   Real rho = rho0 * fout;
-  //   cons.rho = rho;
-  //   cons.px = rho * vx;
-  //   cons.py = rho * vy;
-  //   cons.pz = 0.0;
-  //   cons.en = rho * p0 / (gamma - 1.0) + 0.5 * rho * (vx * vx + vy * vy);
-  //   return;
-  // }
 } // namespace
 
 // ----------------------------------------------------------------------------
 namespace {
   KOKKOS_INLINE_FUNCTION
-  void PointMassGravity(const Real *coord, const Real *prim, const PointMass &p, const Real dt, Real *delta_cons) {
-    // Place holders for generalization
+  void PointMassGravity(
+    const Real *coord, 
+    const Real *prim, 
+    const PointMass &p, 
+    const Real dt, 
+    Real *delta_cons) 
+  {
     Real dx = coord[0] - p.x;
     Real dy = coord[1] - p.y;
     Real dz = coord[2] - p.z;
@@ -123,7 +107,16 @@ namespace {
   }
 
   KOKKOS_INLINE_FUNCTION
-  void BufferSourceTerm(const Real *coord, const Real *prim, const Buffer &buffer, const PointMass &p, const DiskModel &disk, const Real dt, const Real gamma, Real *delta_cons) {
+  void BufferSourceTerm(
+    const Real *coord, 
+    const Real *prim, 
+    const Buffer &buffer, 
+    const PointMass &p, 
+    const DiskModel &disk, 
+    const Real dt, 
+    const Real gamma, 
+    Real *delta_cons) 
+  {
     if (buffer.is_enabled)
     {
       Real x = coord[0];
@@ -163,6 +156,7 @@ namespace {
     }
   }
 
+  // --------------------------------------------------------------------------
   void UserSourceTerms(Mesh *pm, const Real dt) {
     auto &indcs = pm->mb_indcs;
     int is = indcs.is, ie = indcs.ie;
@@ -171,7 +165,6 @@ namespace {
     int nmb1 = pm->pmb_pack->nmb_thispack - 1;
     auto &size = pm->pmb_pack->pmb->mb_size;
 
-    // DvceArray5D<Real> u0_, w0_;
     auto u0_ = pm->pmb_pack->phydro->u0;
     auto w0_ = pm->pmb_pack->phydro->w0;
     Real gamma = pm->pmb_pack->phydro->peos->eos_data.gamma;
@@ -200,16 +193,16 @@ namespace {
       Real vz = w0_(m, IVZ, k, j, i);
       Real p = is_ideal ? w0_(m, IEN, k, j, i) : 0.0;
       
-      Real cc[NDIM] = {x, y, z};// cc[0]=x; cc[1]=y; cc[2]=z;
-      Real pc[NCONS] = {rho, vx, vy, vz, p}; //pc[0]=rho; pc[1]=vx; pc[2]=vy; pc[3]=vz; pc[4]=p;
-      Real du[NCONS] = {0.0, 0.0, 0.0, 0.0, 0.0}; //du[0]=0.0; du[1]=0.0; du[2]=0.0; du[3]=0.0; du[4]=0.0;
+      Real cc[NDIMS] = {x, y, z};
+      Real pc[NCONS] = {rho, vx, vy, vz, p};
+      Real du[NCONS] = {0.0, 0.0, 0.0, 0.0, 0.0};
 
       PointMassGravity(cc, pc, central_mass_, dt, du); //TODO : generalize to binary
       BufferSourceTerm(cc, pc, buffer_, central_mass_, disk_, dt, gamma, du);
       // Other sources
       // - SinkSourceTerm
       // 
-
+      // u0_(m, IDN, k, j, i) += du[0];
       u0_(m, IM1, k, j, i) += du[1];
       u0_(m, IM2, k, j, i) += du[2];
       u0_(m, IM3, k, j, i) += du[3];
@@ -227,25 +220,21 @@ namespace {
 void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
   if (restart) return;
 
-  // Read parameters
-  GM = pin->GetOrAddReal("problem", "GM", 1.0);
-  rs = pin->GetOrAddReal("problem", "rsoft", 0.05);
-  rho0 = pin->GetOrAddReal("problem", "rho0", 1.0);
-  p0 = pin->GetOrAddReal("problem", "p0", 1e-6);
-
   // Set PointMass(es)
-  central_mass.mass = GM;
-  central_mass.rs = rs;
-  central_mass.x = 0.0;
-  central_mass.y = 0.0;
-  central_mass.z = 0.0;
-  central_mass.vx = 0.0;
-  central_mass.vy = 0.0;
-  central_mass.vz = 0.0;
+  central_mass.mass = pin->GetOrAddReal("problem", "GM", 1.0);
+  central_mass.rs   = pin->GetOrAddReal("problem", "rsoft", 0.05);
+  central_mass.x    = 0.0;
+  central_mass.y    = 0.0;
+  central_mass.z    = 0.0;
+  central_mass.vx   = 0.0;
+  central_mass.vy   = 0.0;
+  central_mass.vz   = 0.0;
 
   // Set Disk model
-  disk.rho0 = rho0;
-  disk.p0 = p0;
+  disk.rho0  = pin->GetOrAddReal("problem", "rho0", 1.0);
+  disk.p0    = pin->GetOrAddReal("problem", "p0", 1e-6);
+  disk.rcav  = pin->GetOrAddReal("problem", "rcav", 3.0);
+  disk.fluff = pin->GetOrAddReal("problem", "fluff", 1e-5);
 
   // Read buffer params
   // Formally check if there is a buffer sections in input?
@@ -264,8 +253,6 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
   auto &size = pmbp->pmb->mb_size;
 
   auto &u0_ = pmbp->phydro->u0;
-
-  // Initialize disk using Kokkos parallel loop
   const DiskModel disk_ = disk;
   const PointMass central_mass_ = central_mass;
   const bool is_ideal = pmbp->phydro->peos->eos_data.is_ideal;
@@ -284,17 +271,7 @@ void ProblemGenerator::UserProblem(ParameterInput *pin, const bool restart) {
     Real y = CellCenterX(j - js, nx2, x2min, x2max);
     Real z = CellCenterX(k - ks, nx3, x3min, x3max);
 
-    Real cc[NDIM] = {x, y, z}; //cc[0] = x; cc[1] = y; cc[2] = z;
-    
-    // InitializeCons(cc, &cons0, pmbp->phydro->peos->eos_data.gamma);
-
-    // u0_(m, IDN, k, j, i) = cons0.rho;
-    // u0_(m, IM1, k, j, i) = cons0.px;
-    // u0_(m, IM2, k, j, i) = cons0.py;
-    // u0_(m, IM3, k, j, i) = cons0.pz;
-    // if (pmbp->phydro->peos->eos_data.is_ideal) {
-    //   u0_(m, IEN, k, j, i) = cons.en;
-    // }
+    Real cc[NDIMS] = {x, y, z};
 
     Real prim0[NCONS];
     InitializePrims(cc, central_mass_, disk_, prim0);
