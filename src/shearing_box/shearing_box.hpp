@@ -71,7 +71,7 @@ class ShearingBox {
 #endif
 
   // functions
-  TaskStatus InitRecv(Real time);
+  TaskStatus InitRecv(Real time, int stage);
   TaskStatus ClearRecv();
   TaskStatus ClearSend();
   // function to find target MB offset by shear.  Returns GID and rank

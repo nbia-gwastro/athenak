@@ -19,34 +19,17 @@
 #include "parameter_input.hpp"
 #include "mesh/mesh.hpp"
 #include "coordinates/cell_locations.hpp"
-#include "shearing_box.hpp"
+#include "shearing_box/shearing_box.hpp"
+#include "shearing_box/remap_fluxes.hpp"
 #include "orbital_advection.hpp"
+#include "orbital_advection_restrict_prolong.hpp"
 #include "mhd/mhd.hpp"
-#include "remap_fluxes.hpp"
 
 //----------------------------------------------------------------------------------------
 // OrbitalAdvectionFC derived class constructor:
 
 OrbitalAdvectionFC::OrbitalAdvectionFC(MeshBlockPack *pp, ParameterInput *pin) :
   OrbitalAdvection(pp, pin) {
-  // Initialize boundary buffers
-  int nmb = std::max((pp->nmb_thispack), (pp->pmesh->nmb_maxperrank));
-  auto &indcs = pp->pmesh->mb_indcs;
-  int ncells3 = indcs.nx3 + 1;
-  int ncells2 = indcs.ng + maxjshift;
-  int ncells1 = indcs.nx1 + 1;
-  for (int n=0; n<2; ++n) {
-    Kokkos::realloc(sendbuf[n].vars,nmb,2,ncells3,ncells2,ncells1);
-    Kokkos::realloc(recvbuf[n].vars,nmb,2,ncells3,ncells2,ncells1);
-  }
-
-  // Allocate memory for electric fields
-  nmb = pmy_pack->nmb_thispack;
-  ncells1 = indcs.nx1 + 2*(indcs.ng);
-  ncells2 = indcs.nx2 + 2*(indcs.ng);
-  ncells3 = indcs.nx3 + 2*(indcs.ng);
-  Kokkos::realloc(emfx,nmb,ncells3,ncells2,ncells1);
-  Kokkos::realloc(emfz,nmb,ncells3,ncells2,ncells1);
 }
 
 //----------------------------------------------------------------------------------------
@@ -62,53 +45,63 @@ TaskStatus OrbitalAdvectionFC::PackAndSendFC(DvceFaceFld4D<Real> &b) {
   int my_rank = global_variable::my_rank;
   auto &nghbr = pmy_pack->pmb->nghbr;
   auto &mbgid = pmy_pack->pmb->mb_gid;
+  auto &mblev = pmy_pack->pmb->mb_lev;
   auto &sbuf = sendbuf;
   auto &rbuf = recvbuf;
 
-  auto &indcs = pmy_pack->pmesh->mb_indcs;
-  auto &is = indcs.is, &ie = indcs.ie;
-  auto &js = indcs.js, &je = indcs.je;
-  auto &ks = indcs.ks, &ke = indcs.ke;
-  auto &ng = indcs.ng;
-  const int &maxjshift_ = maxjshift;
+  bool &multi_d = pmy_pack->pmesh->multi_d;
+  bool &three_d = pmy_pack->pmesh->three_d;
+  auto &ng = pmy_pack->pmesh->mb_indcs.ng;
+  int nnghbrs = 8; // number of neighbors on x2-faces (Y-faces)
 
   // Outer loop over (# of MeshBlocks)*(# of buffers)*(# of variables)
-  int nmnv = nmb*2;  // only consider 2 neighbors (x2-faces) and only 2 vars
-  Kokkos::TeamPolicy<> policy(DevExeSpace(), nmnv, Kokkos::AUTO);
+  int nmn = nmb*nnghbrs;  // only consider 8 neighbors (x2-faces) 
+  Kokkos::TeamPolicy<> policy(DevExeSpace(), nmn, Kokkos::AUTO);
   Kokkos::parallel_for("oa-packB", policy, KOKKOS_LAMBDA(TeamMember_t tmember) {
-    const int m = tmember.league_rank()/2;
-    const int n = tmember.league_rank()%2;
+    const int m = (tmember.league_rank())/(nnghbrs); // MeshBlock index
+    const int n = (tmember.league_rank() - m*(nnghbrs)); // neighbor index
 
     // indices of x2-face buffers in nghbr view
-    int nnghbr;
-    if (n==0) {nnghbr=8;} else {nnghbr=12;}
+    int nnghbr = n + nnghbrs;
 
     // only load buffers when neighbor exists
     if (nghbr.d_view(m,nnghbr).gid >= 0) {
-      // neighbor must always be at same level, so use same indices to pack buffer
-      // Note j-range of indices extended by shear
-      int il = is;
-      int iu = ie+1;
-      int jl, ju;
-      if (n==0) {
-        jl = js;
-        ju = js + (ng + maxjshift_ - 1);;
+      int il, iu, jl, ju, kl, ku;
+      // if neighbor is at coarser level, use coar indices to pack buffer
+      if (nghbr.d_view(m,nnghbr).lev < mblev.d_view(m)) {
+        il = sbuf[n].icoar.bis;
+        iu = sbuf[n].icoar.bie;
+        jl = sbuf[n].icoar.bjs;
+        ju = sbuf[n].icoar.bje;
+        kl = sbuf[n].icoar.bks;
+        ku = sbuf[n].icoar.bke;
+      // if neighbor is at same level, use same indices to pack buffer
+      } else if (nghbr.d_view(m,nnghbr).lev == mblev.d_view(m)) {
+        il = sbuf[n].isame.bis;
+        iu = sbuf[n].isame.bie;
+        jl = sbuf[n].isame.bjs;
+        ju = sbuf[n].isame.bje;
+        kl = sbuf[n].isame.bks;
+        ku = sbuf[n].isame.bke;
+      // if neighbor is at finer level, use fine indices to pack buffer
       } else {
-        jl = je - (ng + maxjshift_ - 1);
-        ju = je;
+        il = sbuf[n].ifine.bis;
+        iu = sbuf[n].ifine.bie;
+        jl = sbuf[n].ifine.bjs;
+        ju = sbuf[n].ifine.bje;
+        kl = sbuf[n].ifine.bks;
+        ku = sbuf[n].ifine.bke;
       }
-      int kl = ks;
-      int ku = ke+1;
       int ni = iu - il + 1;
       int nj = ju - jl + 1;
       int nk = ku - kl + 1;
       int nji = nj*ni;
       int nkji = nk*nj*ni;
 
-      // index of recv'ing (destination) MB and buffer [0,1]: MB IDs are stored
+      // index of recv'ing (destination) MB and buffer MB IDs are stored
       // sequentially in MeshBlockPacks, so array index equals (target_id - first_id)
       int dm = nghbr.d_view(m,nnghbr).gid - mbgid.d_view(0);
-      int dn = (n+1) % 2;
+      int dn = nghbr.d_view(m,nnghbr).dest;
 
       // Middle loop over k,j,i
       Kokkos::parallel_for(Kokkos::TeamThreadRange<>(tmember, nkji), [&](const int idx) {
@@ -120,14 +113,87 @@ TaskStatus OrbitalAdvectionFC::PackAndSendFC(DvceFaceFld4D<Real> &b) {
 
         // copy B1/B3 directly into recv buffer if MeshBlocks on same rank
         if (nghbr.d_view(m,nnghbr).rank == my_rank) {
-          rbuf[dn].vars(dm,0,(k-kl),(j-jl),(i-il)) = b.x3f(m,k,j,i);
-          rbuf[dn].vars(dm,1,(k-kl),(j-jl),(i-il)) = b.x1f(m,k,j,i);
+          // if neighbor is at same level, load data directly from b
+          if (nghbr.d_view(m,nnghbr).lev == mblev.d_view(m)) {
+            rbuf[dn-nnghbrs].vars(dm,0,(k-kl),(j-jl),(i-il)) = b.x1f(m,k,j,i);
+            rbuf[dn-nnghbrs].vars(dm,1,(k-kl),(j-jl),(i-il)) = b.x2f(m,k,j,i);
+            rbuf[dn-nnghbrs].vars(dm,2,(k-kl),(j-jl),(i-il)) = b.x3f(m,k,j,i);
+          
+          // else if neighbor is at finer level, prolongate data from b and load
+          } else if (nghbr.d_view(m,nnghbr).lev > mblev.d_view(m)) {
+            int fi = 2*(i - il);
+            int fj = 2*(j - jl);
+            int fk = 2*(k - kl);
+            ProlongateFCSharedFaces(m, k, j, i, dm, fk, fj, fi, multi_d, three_d, b, rbuf[dn-nnghbrs].vars);
+
+          // else neighbor is at coarser level, restrict b and load
+          } else {
+            int fi = 2*(i - il) + il;
+            int fj = 2*(j - jl) + jl;
+            int fk = 2*(k - kl) + kl;
+            if (n>=4) { // if neighbor is on x2-face in positive direction, shift starting j index
+              fj += (jl-ng);
+            }
+            RestrictFC(m, fk, fj, fi, dm, (k-kl), (j-jl), (i-il), n, multi_d, three_d, b, rbuf[dn-nnghbrs].vars);
+          }
         // else copy B1/B3 into send buffer for MPI communication below
         } else {
-          sbuf[n].vars(m,0,(k-kl),(j-jl),(i-il)) = b.x3f(m,k,j,i);
-          sbuf[n].vars(m,1,(k-kl),(j-jl),(i-il)) = b.x1f(m,k,j,i);
+          if (nghbr.d_view(m,nnghbr).lev == mblev.d_view(m)) {
+            sbuf[n].vars(m,0,(k-kl),(j-jl),(i-il)) = b.x1f(m,k,j,i);
+            sbuf[n].vars(m,1,(k-kl),(j-jl),(i-il)) = b.x2f(m,k,j,i);
+            sbuf[n].vars(m,2,(k-kl),(j-jl),(i-il)) = b.x3f(m,k,j,i);
+
+          // else if neighbor is at finer level, prolongate data from b and load
+          } else if (nghbr.d_view(m,nnghbr).lev > mblev.d_view(m)) {
+            int fi = 2*(i - il);
+            int fj = 2*(j - jl);
+            int fk = 2*(k - kl);
+            ProlongateFCSharedFaces(m, k, j, i, m, fk, fj, fi, multi_d, three_d, b, sbuf[n].vars);
+
+          // else neighbor is at coarser level, restrict b and load
+          } else {
+            int fi = 2*(i - il) + il;
+            int fj = 2*(j - jl) + jl;
+            int fk = 2*(k - kl) + kl;
+            if (n>=4) { // if neighbor is on x2-face in positive direction, shift starting j index
+              fj += (jl-ng);
+            }
+            RestrictFC(m, fk, fj, fi, m, (k-kl), (j-jl), (i-il), n, multi_d, three_d, b, sbuf[n].vars);
+          }
         }
       });
+      tmember.team_barrier();
+
+      // if neighbor is at finer level, also prolongate and load internal faces
+      if (nghbr.d_view(m,nnghbr).lev > mblev.d_view(m)) {
+        int ni_ = iu - il + 1;
+        int nj_ = ju - jl + 1;
+        int nk_ = ku - kl + 1;
+        int nji_ = nj_*ni_;
+        int nkji_ = nk_*nj_*ni_;
+        Kokkos::parallel_for(Kokkos::TeamThreadRange<>(tmember, nkji_), [&](const int idx) {
+          int k = (idx)/nji_;
+          int j = (idx - k*nji_)/ni_;
+          int i = (idx - k*nji_ - j*ni_) + il;
+          k += kl;
+          j += jl;
+
+          // copy B1/B3 directly into recv buffer if MeshBlocks on same rank
+          if (nghbr.d_view(m,nnghbr).rank == my_rank) {
+            int fi = 2*(i - il);
+            int fj = 2*(j - jl);
+            int fk = 2*(k - kl);
+            ProlongateFCInternal(dm, fk, fj, fi, three_d, rbuf[dn-nnghbrs].vars);
+
+          // else copy B1/B3 into send buffer for MPI communication below
+          } else {
+            int fi = 2*(i - il);
+            int fj = 2*(j - jl);
+            int fk = 2*(k - kl);
+            ProlongateFCInternal(m, fk, fj, fi, three_d, sbuf[n].vars);
+          }
+        });
+      } // end if-neighbor-is-finer block
     } // end if-neighbor-exists block
   }); // end par_for_outer
 
@@ -136,10 +202,9 @@ TaskStatus OrbitalAdvectionFC::PackAndSendFC(DvceFaceFld4D<Real> &b) {
   Kokkos::fence();
   bool no_errors=true;
   for (int m=0; m<nmb; ++m) {
-    for (int n=0; n<2; ++n) {
+    for (int n=0; n<nnghbrs; ++n) {
       // indices of x2-face buffers in nghbr view
-      int nnghbr;
-      if (n==0) {nnghbr=8;} else {nnghbr=12;}
+      int nnghbr = n + nnghbrs;
       if (nghbr.h_view(m,nnghbr).gid >= 0) {  // neighbor exists and not a physical bndry
         // index and rank of destination Neighbor
         int dn = nghbr.h_view(m,nnghbr).dest;
@@ -180,21 +245,21 @@ TaskStatus OrbitalAdvectionFC::PackAndSendFC(DvceFaceFld4D<Real> &b) {
 //! integer and fractional cell shifts. These fields are then used to update B using CT.
 //! The fields themselves are not directly remapped like the CC variables.
 
-TaskStatus OrbitalAdvectionFC::RecvAndUnpackFC(DvceFaceFld4D<Real> &b0,
+TaskStatus OrbitalAdvectionFC::RecvAndUnpackFC(DvceFaceFld4D<Real> &b0, DvceEdgeFld4D<Real> &efld_orb,
                                              ReconstructionMethod rcon) {
   int nmb = pmy_pack->nmb_thispack;
+  int nnghbrs = 8; // number of neighbors on x2-faces (Y-faces)
+  auto &nghbr = pmy_pack->pmb->nghbr;
   auto &rbuf = recvbuf;
 #if MPI_PARALLEL_ENABLED
-  auto &nghbr = pmy_pack->pmb->nghbr;
   //----- STEP 1: check that recv boundary buffer communications have all completed
 
   bool bflag = false;
   bool no_errors=true;
   for (int m=0; m<nmb; ++m) {
-    for (int n=0; n<2; ++n) {
+    for (int n=0; n<nnghbrs; ++n) {
       // indices of x2-face buffers in nghbr view
-      int nnghbr;
-      if (n==0) {nnghbr=8;} else {nnghbr=12;}
+      int nnghbr = n + nnghbrs;
       if (nghbr.h_view(m,nnghbr).gid >= 0) { // neighbor exists and not a physical bndry
         if (nghbr.h_view(m,nnghbr).rank != global_variable::my_rank) {
           int test;
@@ -219,6 +284,8 @@ TaskStatus OrbitalAdvectionFC::RecvAndUnpackFC(DvceFaceFld4D<Real> &b0,
 #endif
 
   //----- STEP 2: buffers have all completed, so unpack and compute effective EMF
+  auto &mblev = pmy_pack->pmb->mb_lev;
+  auto &mbgid = pmy_pack->pmb->mb_gid;
 
   auto &indcs = pmy_pack->pmesh->mb_indcs;
   auto &is = indcs.is, &ie = indcs.ie;
@@ -230,50 +297,82 @@ TaskStatus OrbitalAdvectionFC::RecvAndUnpackFC(DvceFaceFld4D<Real> &b0,
   int nfx = indcs.nx2 + 2*(ng + maxjshift);
 
   auto &mbsize = pmy_pack->pmb->mb_size;
-  auto &mesh_size = pmy_pack->pmesh->mesh_size;
   Real &dt = pmy_pack->pmesh->dt;
-  Real ly = (mesh_size.x2max - mesh_size.x2min);
   Real qo = qshear*omega0;
 
   int scr_lvl=0;
   size_t scr_size = ScrArray1D<Real>::shmem_size(nfx) * 2;
-  auto &emfx_ = emfx;
-  auto &emfz_ = emfz;
+  auto &emfx = efld_orb.x1e;
+  auto &emfz = efld_orb.x3e;
   par_for_outer("oa-unB",DevExeSpace(),scr_size,scr_lvl,0,(nmb-1),0,1,ks,ke+1,is,ie+1,
   KOKKOS_LAMBDA(TeamMember_t member, const int m, const int v, const int k, const int i) {
     ScrArray1D<Real> b0_(member.team_scratch(scr_lvl), nfx); // 1D slice of data
     ScrArray1D<Real> flx(member.team_scratch(scr_lvl), nfx); // "flux" at faces
-
+    int v_ = v*2; // convert v to 0 for B1, 2 for B3
     Real &x1min = mbsize.d_view(m).x1min;
     Real &x1max = mbsize.d_view(m).x1max;
     int nx1 = indcs.nx1;
 
     Real x1;
-    if (v==0) {
-      // B3 located at x1-cell centers
-      x1 = CellCenterX(i-is, nx1, x1min, x1max);
-    } else if (v==1) {
+    if (v_==0) {
       // B1 located at x1-cell faces
       x1 = LeftEdgeX(i-is, nx1, x1min, x1max);
+    } else if (v_==2) {
+      // B3 located at x1-cell centers
+      x1 = CellCenterX(i-is, nx1, x1min, x1max);
     }
     Real yshear = -(qo)*x1*dt;
     int joffset = static_cast<int>(yshear/(mbsize.d_view(m).dx2));
 
     // Load scratch array with no shift
-    par_for_inner(member, 0, (nfx-1), [&](const int jf) {
+    // loop over x2 indices (and 4 neighbors of each side)
+    Kokkos::parallel_for(Kokkos::TeamThreadRange<>(member, nfx*4), [&](const int idx) {
+      int jf = idx / 4;
+      int n = (idx - jf * 4);
+
       if (jf < jfs) {
-        // Load from L boundary buffer
-        b0_(jf) = rbuf[0].vars(m,v,(k-ks),jf,(i-is));
+        // Load from L boundary buffer of neighbors 8-12
+        if (nghbr.d_view(m,n+nnghbrs).gid >= 0) {
+          // if neighbor is at same or coarser level, load directly from buffer
+          if (nghbr.d_view(m,n+nnghbrs).lev <= mblev.d_view(m)) {
+            b0_(jf) = rbuf[n].vars(m,v_,(k-ks),jf,(i-is));
+          // else neighbor is at finer level, load using fine indices in buffer
+          // and check the neighbor is the correct one of the four for this i and k
+          } else {
+            int il_ = rbuf[n].ifine.bis;
+            int iu_ = rbuf[n].ifine.bie;
+            int kl_ = rbuf[n].ifine.bks;
+            int ku_ = rbuf[n].ifine.bke;
+            if ((i>=il_) & (i<=iu_) & (k>=kl_) & (k<=ku_)) {
+              b0_(jf) = rbuf[n].vars(m,v_,(k-kl_),jf,(i-il_));
+            }
+          }
+        }
       } else if (jf <= jfe) {
         // Load from array itself (addressed with j=jf-jfs+js)
-        if (v==0) {
-          b0_(jf) = b0.x3f(m,k,(jf-jfs+js),i);
-        } else if (v==1) {
+        if (v_==0) {
           b0_(jf) = b0.x1f(m,k,(jf-jfs+js),i);
+        } else if (v_==2) {
+          b0_(jf) = b0.x3f(m,k,(jf-jfs+js),i);
         }
       } else {
-        // Load scratch arrays from R boundary buffer
-        b0_(jf) = rbuf[1].vars(m,v,(k-ks),jf-(jfe+1),(i-is));
+        // Load scratch arrays from R boundary buffer of neighbors 12-16
+        if (nghbr.d_view(m,n+nnghbrs+4).gid >= 0) {
+          // if neighbor is at same or coarser level, load directly from buffer
+          if (nghbr.d_view(m,n+nnghbrs+4).lev <= mblev.d_view(m)) {
+            b0_(jf) = rbuf[n+4].vars(m,v_,(k-ks),jf-(jfe+1),(i-is));
+          // else neighbor is at finer level, load using fine indices in buffer
+          // and check the neighbor is the correct one of the four for this i and k
+          } else {
+            int il_ = rbuf[n+4].ifine.bis;
+            int iu_ = rbuf[n+4].ifine.bie;
+            int kl_ = rbuf[n+4].ifine.bks;
+            int ku_ = rbuf[n+4].ifine.bke;
+            if ( (i>=il_) & (i<=iu_) & (k>=kl_) & (k<=ku_) ) {
+              b0_(jf) = rbuf[n+4].vars(m,v_,(k-kl_),jf-(jfe+1),(i-il_));
+            }                
+          }
+        }
       }
     });
     member.team_barrier();
@@ -297,56 +396,81 @@ TaskStatus OrbitalAdvectionFC::RecvAndUnpackFC(DvceFaceFld4D<Real> &b0,
     }
     member.team_barrier();
 
-    // Compute emfx = -VyBz, which is at cell-center in x1-direction
-    if (v==0) {
+
+    // Compute emfz =  VyBx, which is at cell-face in x1-direction
+    if (v_==0) {
       par_for_inner(member, js, je+1, [&](const int j) {
         int jf = j-js + jfs;
-        emfx_(m,k,j,i) = -flx(jf-joffset);
+        emfz(m,k,j,i) = flx(jf-joffset);
         // Sum integer offsets into effective EMFs
         for (int jj=1; jj<=joffset; jj++) {
-          emfx_(m,k,j,i) -= b0_(jf-jj);
+          emfz(m,k,j,i) += b0_(jf-jj);
         }
         for (int jj=(joffset+1); jj<=0; jj++) {
-          emfx_(m,k,j,i) += b0_(jf-jj);
+          emfz(m,k,j,i) -= b0_(jf-jj);
         }
+        // scale by dx3 to account to refinement in CT update
+        emfz(m,k,j,i) = emfz(m,k,j,i)*mbsize.d_view(m).dx3;
       });
       member.team_barrier();
 
-    // Compute emfz =  VyBx, which is at cell-face in x1-direction
-    } else if (v==1) {
+    // Compute emfx = -VyBz, which is at cell-center in x1-direction
+    } else if (v_==2) {
       par_for_inner(member, js, je+1, [&](const int j) {
         int jf = j-js + jfs;
-        emfz_(m,k,j,i) = flx(jf-joffset);
+        emfx(m,k,j,i) = -flx(jf-joffset);
         // Sum integer offsets into effective EMFs
         for (int jj=1; jj<=joffset; jj++) {
-          emfz_(m,k,j,i) += b0_(jf-jj);
+          emfx(m,k,j,i) -= b0_(jf-jj);
         }
         for (int jj=(joffset+1); jj<=0; jj++) {
-          emfz_(m,k,j,i) -= b0_(jf-jj);
+          emfx(m,k,j,i) += b0_(jf-jj);
         }
+        // scale by dx1 to account to refinement in CT update
+        emfx(m,k,j,i) = emfx(m,k,j,i)*mbsize.d_view(m).dx1;
       });
       member.team_barrier();
     }
   });
+  return TaskStatus::complete;
+}
+
+
+//----------------------------------------------------------------------------------------
+//! \fn  void OrbitalAdvectionFC::CT_OA
+//  \brief Constrained Transport implementation of dB/dt = -Curl(E), where E=-(v X B)
+//  for the orbital advection step. Here the EMFs computed in RecvAndUnpackFC()
+//  are used to update the face-centered fields. 
+//  To be clear, the edge-centered variable 'efld' stores E = -(v X B).
+TaskStatus OrbitalAdvectionFC::CT_OA(DvceFaceFld4D<Real> &b0, DvceEdgeFld4D<Real> &efld_orb) {
+  auto &indcs = pmy_pack->pmesh->mb_indcs;
+  int is = indcs.is, ie = indcs.ie;
+  int js = indcs.js, je = indcs.je;
+  int ks = indcs.ks, ke = indcs.ke;
+  int nmb = pmy_pack->nmb_thispack;
+
+  auto emfx = efld_orb.x1e;
+  auto emfz = efld_orb.x3e;
+  auto &mbsize = pmy_pack->pmb->mb_size;
+  const bool &three_d_ = pmy_pack->pmesh->three_d;
 
   // Update face-centered fields using CT
   //---- update B1 (only for 2D/3D problems)
   if (pmy_pack->pmesh->multi_d) {
     par_for("oaCT-b1", DevExeSpace(), 0, nmb-1, ks, ke, js, je, is, ie+1,
     KOKKOS_LAMBDA(int m, int k, int j, int i) {
-      b0.x1f(m,k,j,i) -= (emfz_(m,k,j+1,i) - emfz_(m,k,j,i));
+      b0.x1f(m,k,j,i) -= (emfz(m,k,j+1,i) - emfz(m,k,j,i))/mbsize.d_view(m).dx3;
     });
   }
 
   //---- update B2 (curl terms in 1D and 3D problems)
-  const bool &three_d_ = pmy_pack->pmesh->three_d;
   par_for("oaCT-b2", DevExeSpace(), 0, nmb-1, ks, ke, js, je+1, is, ie,
   KOKKOS_LAMBDA(int m, int k, int j, int i) {
     Real dydx = mbsize.d_view(m).dx2/mbsize.d_view(m).dx1;
-    b0.x2f(m,k,j,i) += dydx*(emfz_(m,k,j,i+1) - emfz_(m,k,j,i));
+    b0.x2f(m,k,j,i) += dydx*(emfz(m,k,j,i+1) - emfz(m,k,j,i))/mbsize.d_view(m).dx3;
     if (three_d_) {
       Real dydz = mbsize.d_view(m).dx2/mbsize.d_view(m).dx3;
-      b0.x2f(m,k,j,i) -= dydz*(emfx_(m,k+1,j,i) - emfx_(m,k,j,i));
+      b0.x2f(m,k,j,i) -= dydz*(emfx(m,k+1,j,i) - emfx(m,k,j,i))/mbsize.d_view(m).dx1;
     }
   });
 
@@ -354,7 +478,7 @@ TaskStatus OrbitalAdvectionFC::RecvAndUnpackFC(DvceFaceFld4D<Real> &b0,
   if (pmy_pack->pmesh->multi_d) {
     par_for("oaCT-b3", DevExeSpace(), 0, nmb-1, ks, ke+1, js, je, is, ie,
     KOKKOS_LAMBDA(int m, int k, int j, int i) {
-      b0.x3f(m,k,j,i) += (emfx_(m,k,j+1,i) - emfx_(m,k,j,i));
+      b0.x3f(m,k,j,i) += (emfx(m,k,j+1,i) - emfx(m,k,j,i))/mbsize.d_view(m).dx1;
     });
   }
 

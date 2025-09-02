@@ -15,7 +15,7 @@
 #include "globals.hpp"
 #include "parameter_input.hpp"
 #include "mesh/mesh.hpp"
-#include "shearing_box.hpp"
+#include "shearing_box/shearing_box.hpp"
 #include "orbital_advection.hpp"
 
 //----------------------------------------------------------------------------------------
@@ -23,18 +23,18 @@
 //! \brief Posts non-blocking receives (with MPI) for boundary communications with
 //! orbital advection
 
-TaskStatus OrbitalAdvection::InitRecv() {
+TaskStatus OrbitalAdvection::InitRecv(const int nvars) {
 #if MPI_PARALLEL_ENABLED
   const int &nmb = pmy_pack->nmb_thispack;
   const auto &nghbr = pmy_pack->pmb->nghbr;
+  int nnghbrs = 8; // number of neighbors on x2-faces
 
   // Initialize communications of variables
   bool no_errors=true;
   for (int m=0; m<nmb; ++m) {
-    for (int n=0; n<2; ++n) {
+    for (int n=0; n<nnghbrs; ++n) {
       // indices of x2-face buffers in nghbr view
-      int nnghbr;
-      if (n==0) {nnghbr=8;} else {nnghbr=12;}
+      int nnghbr = n + nnghbrs;
       if (nghbr.h_view(m,nnghbr).gid >= 0) {
         // rank of neighboring MeshBlock sending data
         int srank = nghbr.h_view(m,nnghbr).rank;
@@ -77,13 +77,13 @@ TaskStatus OrbitalAdvection::ClearRecv() {
   bool no_errors=true;
   int &nmb = pmy_pack->nmb_thispack;
   auto &nghbr = pmy_pack->pmb->nghbr;
+  int nnghbrs = 8; // number of neighbors on x2-faces
 
   // wait for all non-blocking receives for vars to finish before continuing
   for (int m=0; m<nmb; ++m) {
-    for (int n=0; n<2; ++n) {
+    for (int n=0; n<nnghbrs; ++n) {
       // indices of x2-face buffers in nghbr view
-      int nnghbr;
-      if (n==0) {nnghbr=8;} else {nnghbr=12;}
+      int nnghbr = n + nnghbrs;
       if ( (nghbr.h_view(m,nnghbr).gid >= 0) &&
            (nghbr.h_view(m,nnghbr).rank != global_variable::my_rank) ) {
         int ierr = MPI_Wait(&(recvbuf[n].vars_req[m]), MPI_STATUS_IGNORE);
@@ -111,13 +111,13 @@ TaskStatus OrbitalAdvection::ClearSend() {
   bool no_errors=true;
   int &nmb = pmy_pack->nmb_thispack;
   auto &nghbr = pmy_pack->pmb->nghbr;
+  int nnghbrs = 8; // number of neighbors on x2-faces
 
   // wait for all non-blocking sends for vars to finish before continuing
   for (int m=0; m<nmb; ++m) {
-    for (int n=0; n<2; ++n) {
+    for (int n=0; n<nnghbrs; ++n) {
       // indices of x2-face buffers in nghbr view
-      int nnghbr;
-      if (n==0) {nnghbr=8;} else {nnghbr=12;}
+      int nnghbr = n + nnghbrs;
       if ( (nghbr.h_view(m,nnghbr).gid >= 0) &&
            (nghbr.h_view(m,nnghbr).rank != global_variable::my_rank) ) {
         int ierr = MPI_Wait(&(sendbuf[n].vars_req[m]), MPI_STATUS_IGNORE);

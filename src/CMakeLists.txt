@@ -56,7 +56,7 @@ add_executable(
 
         geodesic-grid/geodesic_grid.cpp
         geodesic-grid/spherical_grid.cpp
-	geodesic-grid/gauss_legendre.cpp
+	      geodesic-grid/gauss_legendre.cpp
 
         hydro/hydro.cpp
         hydro/hydro_fluxes.cpp
@@ -134,10 +134,12 @@ add_executable(
         radiation/radiation_tetrad.cpp
         radiation/radiation_update.cpp
 
-        shearing_box/orbital_advection.cpp
-        shearing_box/orbital_advection_cc.cpp
-        shearing_box/orbital_advection_fc.cpp
-        shearing_box/orbital_advection_tasks.cpp
+        shearing_box/orbital_advection/orbital_advection.cpp
+        shearing_box/orbital_advection/orbital_advection_cc.cpp
+        shearing_box/orbital_advection/orbital_advection_fc.cpp
+        shearing_box/orbital_advection/orbital_advection_tasks.cpp
+        shearing_box/orbital_advection/orbital_advection_buffer_cc.cpp
+        shearing_box/orbital_advection/orbital_advection_buffer_fc.cpp
         shearing_box/shearing_box.cpp
         shearing_box/shearing_box_cc.cpp
         shearing_box/shearing_box_fc.cpp

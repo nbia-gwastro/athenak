@@ -67,6 +67,9 @@ struct MHDTaskIDs {
   TaskID ct;
   TaskID sendb_oa;
   TaskID recvb_oa;
+  TaskID sende_oa;
+  TaskID recve_oa;
+  TaskID ct_oa;
   TaskID restb;
   TaskID sendb;
   TaskID recvb;
@@ -174,6 +177,9 @@ class MHD {
   TaskStatus CT(Driver *d, int stage);
   TaskStatus SendB_OA(Driver *d, int stage);
   TaskStatus RecvB_OA(Driver *d, int stage);
+  TaskStatus SendE_OA(Driver *d, int stage);
+  TaskStatus RecvE_OA(Driver *d, int stage);
+  TaskStatus CT_OA(Driver *d, int stage);
   TaskStatus RestrictB(Driver *d, int stage);
   TaskStatus SendB(Driver *d, int stage);
   TaskStatus RecvB(Driver *d, int stage);
@@ -195,6 +201,7 @@ class MHD {
   void FOFC(Driver *d, int stage);
 
   DvceArray5D<Real> utest, bcctest;  // scratch arrays for FOFC
+  DvceEdgeFld4D<Real> efld_orb;   // scratch arrays of edge-centered electric fields (fluxes of B) used for orbital advection
 
  private:
   MeshBlockPack* pmy_pack;   // ptr to MeshBlockPack containing this MHD

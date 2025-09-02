@@ -24,7 +24,7 @@
 #include "srcterms/srcterms.hpp"
 #include "bvals/bvals.hpp"
 #include "shearing_box/shearing_box.hpp"
-#include "shearing_box/orbital_advection.hpp"
+#include "shearing_box/orbital_advection/orbital_advection.hpp"
 #include "mhd/mhd.hpp"
 #include "dyn_grmhd/dyn_grmhd.hpp"
 
@@ -65,7 +65,10 @@ void MHD::AssembleMHDTasks(std::map<std::string, std::shared_ptr<TaskList>> tl) 
   id.ct        = tl["stagen"]->AddTask(&MHD::CT, this, id.recve);
   id.sendb_oa  = tl["stagen"]->AddTask(&MHD::SendB_OA, this, id.ct);
   id.recvb_oa  = tl["stagen"]->AddTask(&MHD::RecvB_OA, this, id.sendb_oa);
-  id.restb     = tl["stagen"]->AddTask(&MHD::RestrictB, this, id.recvb_oa);
+  id.sende_oa  = tl["stagen"]->AddTask(&MHD::SendE_OA, this, id.recvb_oa);
+  id.recve_oa  = tl["stagen"]->AddTask(&MHD::RecvE_OA, this, id.sende_oa);
+  id.ct_oa     = tl["stagen"]->AddTask(&MHD::CT_OA, this, id.recve_oa);
+  id.restb     = tl["stagen"]->AddTask(&MHD::RestrictB, this, id.ct_oa);
   id.sendb     = tl["stagen"]->AddTask(&MHD::SendB, this, id.restb);
   id.recvb     = tl["stagen"]->AddTask(&MHD::RecvB, this, id.sendb);
   id.sendb_shr = tl["stagen"]->AddTask(&MHD::SendB_Shr, this, id.recvb);
@@ -130,9 +133,9 @@ TaskStatus MHD::InitRecv(Driver *pdrive, int stage) {
     // only execute when (last stage) AND (3D OR 2d_r_phi)
     if ((stage == pdrive->nexp_stages) &&
         (pmy_pack->pmesh->three_d || porb_u->shearing_box_r_phi)) {
-      tstat = porb_u->InitRecv();
+      tstat = porb_u->InitRecv(nmhd+nscalars);
       if (tstat != TaskStatus::complete) return tstat;
-      tstat = porb_b->InitRecv();
+      tstat = porb_b->InitRecv(3);
       if (tstat != TaskStatus::complete) return tstat;
     }
   }
@@ -146,9 +149,9 @@ TaskStatus MHD::InitRecv(Driver *pdrive, int stage) {
       if (stage == pdrive->nexp_stages) {
         time += pmy_pack->pmesh->dt;
       }
-      tstat = psbox_u->InitRecv(time);
+      tstat = psbox_u->InitRecv(time, stage);
       if (tstat != TaskStatus::complete) return tstat;
-      tstat = psbox_b->InitRecv(time);
+      tstat = psbox_b->InitRecv(time, stage);
       if (tstat != TaskStatus::complete) return tstat;
     }
   }
@@ -436,7 +439,60 @@ TaskStatus MHD::RecvB_OA(Driver *pdrive, int stage) {
     // only execute when (last stage) AND (3D OR 2d_r_phi)
     if ((stage == pdrive->nexp_stages) &&
         (pmy_pack->pmesh->three_d || porb_b->shearing_box_r_phi)) {
-      tstat = porb_b->RecvAndUnpackFC(b0, recon_method);
+      tstat = porb_b->RecvAndUnpackFC(b0, efld_orb, recon_method);
+    }
+  }
+  return tstat;
+}
+
+
+//----------------------------------------------------------------------------------------
+//! \fn TaskStatus MHD::SendE_OA
+//! \brief Wrapper task list function to pack/send fluxes of magnetic fields for orbital advection
+//! (i.e. edge-centered electric field E) at MeshBlock boundaries. This is performed both
+//! at MeshBlock boundaries at the same level (to keep magnetic flux in-sync on different
+//! MeshBlocks), and at fine/coarse boundaries with SMR/AMR using restricted values of E.
+
+TaskStatus MHD::SendE_OA(Driver *pdrive, int stage) {
+  TaskStatus tstat = TaskStatus::complete;
+  if (porb_b != nullptr) {
+    // only execute when (last stage) AND (3D OR 2d_r_phi)
+    if ((stage == pdrive->nexp_stages) &&
+        (pmy_pack->pmesh->three_d || porb_b->shearing_box_r_phi)) {
+    tstat = pbval_b->PackAndSendFluxFC(efld_orb);
+    }
+  }
+  return tstat;
+}
+
+//----------------------------------------------------------------------------------------
+//! \fn TaskStatus MHD::RecvE_OA
+//! \brief Wrapper task list function to recv/unpack fluxes of magnetic fields for orbital advection
+//! (i.e. edge-centered electric field E) at MeshBlock boundaries
+
+TaskStatus MHD::RecvE_OA(Driver *pdrive, int stage) {
+  TaskStatus tstat = TaskStatus::complete;
+  if (porb_b != nullptr) {
+    // only execute when (last stage) AND (3D OR 2d_r_phi)
+    if ((stage == pdrive->nexp_stages) &&
+        (pmy_pack->pmesh->three_d || porb_b->shearing_box_r_phi)) {
+    tstat = pbval_b->RecvAndUnpackFluxFC(efld_orb);
+    }
+  }
+  return tstat;
+}
+
+//----------------------------------------------------------------------------------------
+//! \fn TaskList MHD::CT_OA
+//! \brief Wrapper task list function to constrained transport for orbital advection
+
+TaskStatus MHD::CT_OA(Driver *pdrive, int stage) {
+  TaskStatus tstat = TaskStatus::complete;
+  if (porb_b != nullptr) {
+    // only execute when (last stage) AND (3D OR 2d_r_phi)
+    if ((stage == pdrive->nexp_stages) &&
+        (pmy_pack->pmesh->three_d || porb_b->shearing_box_r_phi)) {
+    tstat = porb_b->CT_OA(b0, efld_orb);
     }
   }
   return tstat;

@@ -23,7 +23,7 @@
 #include "srcterms/srcterms.hpp"
 #include "bvals/bvals.hpp"
 #include "shearing_box/shearing_box.hpp"
-#include "shearing_box/orbital_advection.hpp"
+#include "shearing_box/orbital_advection/orbital_advection.hpp"
 #include "hydro/hydro.hpp"
 
 namespace hydro {
@@ -101,7 +101,7 @@ TaskStatus Hydro::InitRecv(Driver *pdrive, int stage) {
   if (porb_u != nullptr) {
     if ((stage == pdrive->nexp_stages) &&
         (pmy_pack->pmesh->three_d || porb_u->shearing_box_r_phi)) {
-      tstat = porb_u->InitRecv();
+      tstat = porb_u->InitRecv(nhydro+nscalars);
     }
   }
   if (tstat != TaskStatus::complete) return tstat;
@@ -115,7 +115,7 @@ TaskStatus Hydro::InitRecv(Driver *pdrive, int stage) {
       if (stage == pdrive->nexp_stages) {
         time += pmy_pack->pmesh->dt;
       }
-      tstat = psbox_u->InitRecv(time);
+      tstat = psbox_u->InitRecv(time, stage);
     }
   }
 

@@ -18,7 +18,7 @@
 #include "diffusion/conduction.hpp"
 #include "srcterms/srcterms.hpp"
 #include "shearing_box/shearing_box.hpp"
-#include "shearing_box/orbital_advection.hpp"
+#include "shearing_box/orbital_advection/orbital_advection.hpp"
 #include "bvals/bvals.hpp"
 #include "hydro/hydro.hpp"
 
@@ -122,8 +122,10 @@ Hydro::Hydro(MeshBlockPack *ppack, ParameterInput *pin) :
 
   // Orbital advection and shearing box BCs (if requested in input file)
   if (pin->DoesBlockExist("shearing_box")) {
-    porb_u = new OrbitalAdvectionCC(ppack, pin, (nhydro+nscalars));
     psbox_u = new ShearingBoxCC(ppack, pin, (nhydro+nscalars));
+    porb_u = new OrbitalAdvectionCC(ppack, pin, (nhydro+nscalars));
+    // allocate boundary buffers for orbital advection
+    porb_u->InitializeBuffers((nhydro+nscalars));
   } else {
     porb_u = nullptr;
     psbox_u = nullptr;

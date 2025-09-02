@@ -22,11 +22,48 @@
 //! \brief Calculates x2-distance that x1-boundaries have sheared.  With MPI, posts
 //! non-blocking receives for boundary communications for shearing box boundaries
 
-TaskStatus ShearingBox::InitRecv(Real time) {
+TaskStatus ShearingBox::InitRecv(Real time, int stage) {
   // figure out distance boundaries are sheared
   const auto &mesh_size = pmy_pack->pmesh->mesh_size;
   Real lx = (mesh_size.x1max - mesh_size.x1min);
   yshear = (qshear*omega0)*lx*time;
+
+
+  // if adaptive mesh, must update GIDs of of MBs at x1 boundaries
+  if (stage==-1 && pmy_pack->pmesh->adaptive) {
+    std::vector<int> tmp_ix1bndry_gid, tmp_ox1bndry_gid;
+    auto &mbbcs = pmy_pack->pmb->mb_bcs;
+    for (int m=0; m<(pmy_pack->nmb_thispack); ++m) {
+      if (mbbcs.h_view(m,BoundaryFace::inner_x1) == BoundaryFlag::shear_periodic) {
+        tmp_ix1bndry_gid.push_back(m + pmy_pack->gids);
+      }
+      if (mbbcs.h_view(m,BoundaryFace::outer_x1) == BoundaryFlag::shear_periodic) {
+        tmp_ox1bndry_gid.push_back(m + pmy_pack->gids);
+      }
+    }
+    // number of MBs at ix1/ox1 boundaries is size of vectors
+    nmb_x1bndry(0) = tmp_ix1bndry_gid.size();
+    nmb_x1bndry(1) = tmp_ox1bndry_gid.size();
+
+    // allocate mbgid array and initialize GIDs to -1
+    int nmb = std::max(nmb_x1bndry(0),nmb_x1bndry(1));
+    Kokkos::realloc(x1bndry_mbgid, 2, nmb);
+    for (int n=0; n<2; ++n) {
+      for (int m=0; m<nmb; ++m) {
+        x1bndry_mbgid.h_view(n,m) = -1;
+      }
+    }
+    // load GIDs of meshblocks at x1 boundaries into DualArray
+    for (int m=0; m<nmb_x1bndry(0); ++m) {
+      x1bndry_mbgid.h_view(0,m) = tmp_ix1bndry_gid[m];
+    }
+    for (int m=0; m<nmb_x1bndry(1); ++m) {
+      x1bndry_mbgid.h_view(1,m) = tmp_ox1bndry_gid[m];
+    }
+    // sync with device
+    x1bndry_mbgid.template modify<HostMemSpace>();
+    x1bndry_mbgid.template sync<DevExeSpace>();
+  }
 
 #if MPI_PARALLEL_ENABLED
   // post non-blocking receives

@@ -19,7 +19,7 @@
 #include "diffusion/conduction.hpp"
 #include "srcterms/srcterms.hpp"
 #include "shearing_box/shearing_box.hpp"
-#include "shearing_box/orbital_advection.hpp"
+#include "shearing_box/orbital_advection/orbital_advection.hpp"
 #include "bvals/bvals.hpp"
 #include "mhd/mhd.hpp"
 
@@ -53,7 +53,8 @@ MHD::MHD(MeshBlockPack *ppack, ParameterInput *pin) :
     e3_cc("e3_cc",1,1,1,1),
     utest("utest",1,1,1,1,1),
     bcctest("bcctest",1,1,1,1,1),
-    fofc("fofc",1,1,1,1) {
+    fofc("fofc",1,1,1,1),
+    efld_orb("efld_orb",1,1,1,1) {
   // Total number of MeshBlocks on this rank to be used in array dimensioning
   int nmb = std::max((ppack->nmb_thispack), (ppack->pmesh->nmb_maxperrank));
 
@@ -160,10 +161,22 @@ MHD::MHD(MeshBlockPack *ppack, ParameterInput *pin) :
 
   // Orbital advection and shearing box BCs (if requested in input file)
   if (pin->DoesBlockExist("shearing_box")) {
-    porb_u = new OrbitalAdvectionCC(ppack, pin, (nmhd+nscalars));
-    porb_b = new OrbitalAdvectionFC(ppack, pin);
     psbox_u = new ShearingBoxCC(ppack, pin, (nmhd+nscalars));
     psbox_b = new ShearingBoxFC(ppack, pin);
+
+    porb_u = new OrbitalAdvectionCC(ppack, pin, (nmhd+nscalars));
+    porb_u->InitializeBuffers((nmhd+nscalars));
+    porb_b = new OrbitalAdvectionFC(ppack, pin);
+    porb_b->InitializeBuffers(3);
+
+    // allocate memory for emf used in orbital advection
+    auto &indcs = pmy_pack->pmesh->mb_indcs;
+    int ncells1 = indcs.nx1 + 2*(indcs.ng);
+    int ncells2 = (indcs.nx2 > 1)? (indcs.nx2 + 2*(indcs.ng)) : 1;
+    int ncells3 = (indcs.nx3 > 1)? (indcs.nx3 + 2*(indcs.ng)) : 1;
+    Kokkos::realloc(efld_orb.x1e, nmb, ncells3+1, ncells2+1, ncells1);
+    Kokkos::realloc(efld_orb.x2e, nmb, ncells3+1, ncells2, ncells1+1);
+    Kokkos::realloc(efld_orb.x3e, nmb, ncells3, ncells2+1, ncells1+1);
   } else {
     porb_u = nullptr;
     porb_b = nullptr;
