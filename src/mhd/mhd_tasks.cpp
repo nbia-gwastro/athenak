@@ -459,7 +459,18 @@ TaskStatus MHD::SendE_OA(Driver *pdrive, int stage) {
     // only execute when (last stage) AND (3D OR 2d_r_phi)
     if ((stage == pdrive->nexp_stages) &&
         (pmy_pack->pmesh->three_d || porb_b->shearing_box_r_phi)) {
-    tstat = pbval_b->PackAndSendFluxFC(efld_orb);
+    
+      // check sends and recv of restricted fluxes of B complete, 
+      // and then initlize new recvs for OA send/recv of fluxes
+      // TODO: should the TaskStatus be checked here?
+      tstat = pbval_b->ClearFluxSend();
+      // if (tstat != TaskStatus::complete) return tstat;
+      tstat = pbval_b->ClearFluxRecv();
+      // if (tstat != TaskStatus::complete) return tstat;
+      tstat = pbval_b->InitFluxRecv(3);
+      // if (tstat != TaskStatus::complete) return tstat;
+
+      tstat = pbval_b->PackAndSendFluxFC(efld_orb);
     }
   }
   return tstat;
@@ -476,7 +487,7 @@ TaskStatus MHD::RecvE_OA(Driver *pdrive, int stage) {
     // only execute when (last stage) AND (3D OR 2d_r_phi)
     if ((stage == pdrive->nexp_stages) &&
         (pmy_pack->pmesh->three_d || porb_b->shearing_box_r_phi)) {
-    tstat = pbval_b->RecvAndUnpackFluxFC(efld_orb);
+      tstat = pbval_b->RecvAndUnpackFluxFC(efld_orb);
     }
   }
   return tstat;
@@ -492,7 +503,7 @@ TaskStatus MHD::CT_OA(Driver *pdrive, int stage) {
     // only execute when (last stage) AND (3D OR 2d_r_phi)
     if ((stage == pdrive->nexp_stages) &&
         (pmy_pack->pmesh->three_d || porb_b->shearing_box_r_phi)) {
-    tstat = porb_b->CT_OA(b0, efld_orb);
+      tstat = porb_b->CT_OA(b0, efld_orb);
     }
   }
   return tstat;
@@ -623,7 +634,7 @@ TaskStatus MHD::ClearSend(Driver *pdrive, int stage) {
     if (tstat != TaskStatus::complete) return tstat;
   }
 
-  // with SMR/AMR check sends for fluxes of U complete.  Always check sends of E complete
+    // with SMR/AMR check sends for fluxes of U complete.  Always check sends of E complete
   // do not check flux send for ICs (stage < 0)
   if (stage >= 0) {
     // with SMR/AMR check sends of restricted fluxes of U complete
