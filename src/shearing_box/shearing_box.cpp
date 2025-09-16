@@ -24,12 +24,12 @@
 ShearingBox::ShearingBox(MeshBlockPack *ppack, ParameterInput *pin) :
     nmb_x1bndry("nmbx1",2),
     x1bndry_mbgid("x1gid",1,1),
-    shearing_box_r_phi(false),     // 2D r-phi not yet implemented
     pmy_pack(ppack) {
   // Read shear rate and orbital frequency
   qshear = pin->GetReal("shearing_box","qshear");
   omega0 = pin->GetReal("shearing_box","omega0");
   is_stratified = pin->GetOrAddBoolean("shearing_box","stratified",false);
+  shearing_box_r_phi = pin->GetOrAddBoolean("shearing_box","2d_r_phi",false);
 
   // Create vector with GID of every MBs on this rank at ix1/ox1 shearing-box boundaries
   std::vector<int> tmp_ix1bndry_gid, tmp_ox1bndry_gid;

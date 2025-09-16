@@ -30,11 +30,11 @@
 
 OrbitalAdvection::OrbitalAdvection(MeshBlockPack *ppack, ParameterInput *pin) :
     maxjshift(1),
-    shearing_box_r_phi(false),     // 2D r-phi not yet implemented
     pmy_pack(ppack) {
   // Read shear rate and orbital frequency
   qshear = pin->GetReal("shearing_box","qshear");
   omega0 = pin->GetReal("shearing_box","omega0");
+  shearing_box_r_phi = pin->GetOrAddBoolean("shearing_box","2d_r_phi",false);
 
   // estimate maximum integer shift in x2-direction for orbital advection
   Real xmin = fabs(ppack->pmesh->mesh_size.x1min);

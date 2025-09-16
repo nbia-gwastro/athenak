@@ -29,7 +29,8 @@ ShearingBoxCC::ShearingBoxCC(MeshBlockPack *pp, ParameterInput *pin, int nvar) :
     ShearingBox(pp, pin) {
   // Allocate boundary buffers
   auto &indcs = pp->pmesh->mb_indcs;
-  int ncells3 = indcs.nx3 + 2*indcs.ng;
+  int ncells3 = indcs.nx3;
+  if (pp->pmesh->three_d) {ncells3 += 2*indcs.ng;}
   int ncells2 = indcs.nx2 + 2*indcs.ng;
   int ncells1 = indcs.ng;
   for (int n=0; n<2; ++n) {

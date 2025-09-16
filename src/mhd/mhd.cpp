@@ -161,6 +161,12 @@ MHD::MHD(MeshBlockPack *ppack, ParameterInput *pin) :
 
   // Orbital advection and shearing box BCs (if requested in input file)
   if (pin->DoesBlockExist("shearing_box")) {
+    if (pin->GetOrAddBoolean("shearing_box","2d_r_phi",false)) {
+      std::cout <<"### FATAL ERROR in "<< __FILE__ <<" at line "<< __LINE__ << std::endl
+                <<"shearing_box_r_phi = true is not yet implemented for MHD"<< std::endl;
+      std::exit(EXIT_FAILURE);
+    }
+
     psbox_u = new ShearingBoxCC(ppack, pin, (nmhd+nscalars));
     psbox_b = new ShearingBoxFC(ppack, pin);
 

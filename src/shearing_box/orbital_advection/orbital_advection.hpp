@@ -77,7 +77,7 @@ class OrbitalAdvection {
   // data
   int maxjshift;            // maximum integer shift of any cell in orbital advection
   Real qshear, omega0;      // Copies needed for all OA functions
-  bool shearing_box_r_phi;  // NOT YET IMPLEMENTED
+  bool shearing_box_r_phi;  // true for 2D r-phi shearing box - NOT YET IMPLEMENTED FOR MHD
 
   // data buffers for orbital advection. Only two x2-faces communicate of maximum 8 meshblocks
   OrbitalAdvectionBoundaryBuffer sendbuf[8], recvbuf[8];
