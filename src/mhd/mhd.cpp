@@ -161,28 +161,33 @@ MHD::MHD(MeshBlockPack *ppack, ParameterInput *pin) :
 
   // Orbital advection and shearing box BCs (if requested in input file)
   if (pin->DoesBlockExist("shearing_box")) {
-    if (pin->GetOrAddBoolean("shearing_box","2d_r_phi",false)) {
-      std::cout <<"### FATAL ERROR in "<< __FILE__ <<" at line "<< __LINE__ << std::endl
-                <<"shearing_box_r_phi = true is not yet implemented for MHD"<< std::endl;
-      std::exit(EXIT_FAILURE);
-    }
+    // if (pin->GetOrAddBoolean("shearing_box","2d_r_phi",false)) {
+    //   std::cout <<"### FATAL ERROR in "<< __FILE__ <<" at line "<< __LINE__ << std::endl
+    //             <<"shearing_box_r_phi = true is not yet implemented for MHD"<< std::endl;
+    //   std::exit(EXIT_FAILURE);
+    // }
 
     psbox_u = new ShearingBoxCC(ppack, pin, (nmhd+nscalars));
     psbox_b = new ShearingBoxFC(ppack, pin);
 
-    porb_u = new OrbitalAdvectionCC(ppack, pin, (nmhd+nscalars));
-    porb_u->InitializeBuffers((nmhd+nscalars));
-    porb_b = new OrbitalAdvectionFC(ppack, pin);
-    porb_b->InitializeBuffers(3);
+    if (pin->GetBoolean("shearing_box","orbital_advection")) {
+      porb_u = new OrbitalAdvectionCC(ppack, pin, (nmhd+nscalars));
+      porb_u->InitializeBuffers((nmhd+nscalars));
+      porb_b = new OrbitalAdvectionFC(ppack, pin);
+      porb_b->InitializeBuffers(3);
 
-    // allocate memory for emf used in orbital advection
-    auto &indcs = pmy_pack->pmesh->mb_indcs;
-    int ncells1 = indcs.nx1 + 2*(indcs.ng);
-    int ncells2 = (indcs.nx2 > 1)? (indcs.nx2 + 2*(indcs.ng)) : 1;
-    int ncells3 = (indcs.nx3 > 1)? (indcs.nx3 + 2*(indcs.ng)) : 1;
-    Kokkos::realloc(efld_orb.x1e, nmb, ncells3+1, ncells2+1, ncells1);
-    Kokkos::realloc(efld_orb.x2e, nmb, ncells3+1, ncells2, ncells1+1);
-    Kokkos::realloc(efld_orb.x3e, nmb, ncells3, ncells2+1, ncells1+1);
+      // allocate memory for emf used in orbital advection
+      auto &indcs = pmy_pack->pmesh->mb_indcs;
+      int ncells1 = indcs.nx1 + 2*(indcs.ng);
+      int ncells2 = (indcs.nx2 > 1)? (indcs.nx2 + 2*(indcs.ng)) : 1;
+      int ncells3 = (indcs.nx3 > 1)? (indcs.nx3 + 2*(indcs.ng)) : 1;
+      Kokkos::realloc(efld_orb.x1e, nmb, ncells3+1, ncells2+1, ncells1);
+      Kokkos::realloc(efld_orb.x2e, nmb, ncells3+1, ncells2, ncells1+1);
+      Kokkos::realloc(efld_orb.x3e, nmb, ncells3, ncells2+1, ncells1+1);
+    } else {
+      porb_u = nullptr;
+      porb_b = nullptr;
+    }
   } else {
     porb_u = nullptr;
     porb_b = nullptr;

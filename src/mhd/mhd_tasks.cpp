@@ -276,7 +276,7 @@ TaskStatus MHD::MHDSrcTerms(Driver *pdrive, int stage) {
 
   // Add user source terms
   if (pmy_pack->pmesh->pgen->user_srcs) {
-    (pmy_pack->pmesh->pgen->user_srcs_func)(pmy_pack->pmesh, beta_dt);
+    (pmy_pack->pmesh->pgen->user_srcs_func)(pmy_pack->pmesh, beta_dt, stage);
   }
 
   return TaskStatus::complete;

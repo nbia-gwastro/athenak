@@ -123,9 +123,11 @@ Hydro::Hydro(MeshBlockPack *ppack, ParameterInput *pin) :
   // Orbital advection and shearing box BCs (if requested in input file)
   if (pin->DoesBlockExist("shearing_box")) {
     psbox_u = new ShearingBoxCC(ppack, pin, (nhydro+nscalars));
-    porb_u = new OrbitalAdvectionCC(ppack, pin, (nhydro+nscalars));
-    // allocate boundary buffers for orbital advection
-    porb_u->InitializeBuffers((nhydro+nscalars));
+    if (pin->GetOrAddBoolean("shearing_box","orbital_advection",true)) {
+      porb_u = new OrbitalAdvectionCC(ppack, pin, (nhydro+nscalars));
+      // allocate boundary buffers for orbital advection
+      porb_u->InitializeBuffers((nhydro+nscalars));
+    } else porb_u = nullptr;
   } else {
     porb_u = nullptr;
     psbox_u = nullptr;

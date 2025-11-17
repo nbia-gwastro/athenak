@@ -17,7 +17,7 @@
 
 using ProblemFinalizeFnPtr = void (*)(ParameterInput *pin, Mesh *pm);
 using UserBoundaryFnPtr = void (*)(Mesh* pm);
-using UserSrctermFnPtr = void (*)(Mesh* pm, const Real bdt);
+using UserSrctermFnPtr = void (*)(Mesh* pm, const Real bdt, const int stage);
 using UserRefinementFnPtr = void (*)(MeshBlockPack* pmbp);
 using UserHistoryFnPtr = void (*)(HistoryData *pdata, Mesh *pm);
 

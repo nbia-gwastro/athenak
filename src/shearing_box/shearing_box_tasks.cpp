@@ -26,7 +26,8 @@ TaskStatus ShearingBox::InitRecv(Real time, int stage) {
   // figure out distance boundaries are sheared
   const auto &mesh_size = pmy_pack->pmesh->mesh_size;
   Real lx = (mesh_size.x1max - mesh_size.x1min);
-  yshear = (qshear*omega0)*lx*time;
+  qomL    = qshear*omega0*lx;
+  yshear  = qomL*time;
 
 
   // if adaptive mesh, must update GIDs of of MBs at x1 boundaries

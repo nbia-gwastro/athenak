@@ -52,7 +52,8 @@ TaskStatus ShearingBoxCC::PackAndSendCC(DvceArray5D<Real> &a, ReconstructionMeth
   const auto &js = indcs.js, &je = indcs.je;
   const auto &ks = indcs.ks, &ke = indcs.ke;
   const auto &ng = indcs.ng;
-
+  const Real &qomL_ = qomL;
+  auto oa_active = orbital_advection_active;
   // copy ghost zones at x1-faces into send buffer view
   // apply fractional cell offset to data in send buffers using conservative remap
   const int nvar = a.extent_int(1);  // TODO(@user): 2nd index from L must be NVAR
@@ -78,10 +79,12 @@ TaskStatus ShearingBoxCC::PackAndSendCC(DvceArray5D<Real> &a, ReconstructionMeth
       if (n==0) {
         par_for_inner(member, 0, nj-1, [&](const int j) {
           a_(j) = a(mm,v,k,j,i);
+          if (!oa_active && v==2) a_(j) += a(mm,0,k,j,i)*qomL_;
         });
       } else {
         par_for_inner(member, 0, nj-1, [&](const int j) {
           a_(j) = a(mm,v,k,j,(ie+1)+i);
+          if (!oa_active && v==2) a_(j) -= a(mm,0,k,j,(ie+1)+i)*qomL_; // TODO: add energy update
         });
       }
       member.team_barrier();

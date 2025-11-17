@@ -56,10 +56,11 @@ class ShearingBox {
   // data
   HostArray1D<int> nmb_x1bndry;    // number of MBs that touch x1 boundaries
   DualArray2D<int> x1bndry_mbgid;  // GIDs of MBs at x1 boundaries
-  Real yshear;                     // x2-distance x1-boundaries have sheared
+  Real yshear, qomL;                     // x2-distance x1-boundaries have sheared
   Real qshear, omega0;             // Copies needed for all SB funcs
   bool shearing_box_r_phi;         // true for 2D r-phi shearing box - NOT YET IMPLEMENTED FOR MHD
   bool is_stratified;              // true for stratified shearing box
+  bool orbital_advection_active;   // true for active orbital adveciton
 
   // data buffers for shearing box BCs.  Only two x1-faces get sheared
   // Use seperate variables for ix1/ox1 since number of MBs on each face can be different

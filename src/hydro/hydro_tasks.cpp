@@ -243,8 +243,9 @@ TaskStatus Hydro::HydroSrcTerms(Driver *pdrive, int stage) {
   if (psrc->rel_cooling)  psrc->RelCooling(w0, peos->eos_data, beta_dt, u0);
 
   // Add shearing box source terms for cell-centered hydro variables
-  if (psbox_u != nullptr) psbox_u->SourceTermsCC(w0, peos->eos_data, beta_dt, u0);
-
+  if (psbox_u != nullptr){
+    psbox_u->SourceTermsCC(w0, peos->eos_data, beta_dt, u0);
+  }
   // Add coordinate source terms in GR.  Again, must be computed with only primitives.
   if (pmy_pack->pcoord->is_general_relativistic) {
     pmy_pack->pcoord->CoordSrcTerms(w0, peos->eos_data, beta_dt, u0);
@@ -252,7 +253,7 @@ TaskStatus Hydro::HydroSrcTerms(Driver *pdrive, int stage) {
 
   // Add user source terms
   if (pmy_pack->pmesh->pgen->user_srcs) {
-    (pmy_pack->pmesh->pgen->user_srcs_func)(pmy_pack->pmesh, beta_dt);
+    (pmy_pack->pmesh->pgen->user_srcs_func)(pmy_pack->pmesh, beta_dt, stage);
   }
 
   return TaskStatus::complete;

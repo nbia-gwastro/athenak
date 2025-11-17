@@ -34,18 +34,37 @@ void ShearingBoxCC::SourceTermsCC(const DvceArray5D<Real> &w0, const EOS_Data &e
   int nmb1 = pmy_pack->nmb_thispack - 1;
   auto three_d_ = pmy_pack->pmesh->three_d;
   auto is_strat = is_stratified;
+  auto oa_active = orbital_advection_active;
 
-  // 3D or 2D r-phi source terms
-  if (shearing_box_r_phi || three_d_) {
+  Real qo, coef1, coef2, coef3, coef_strat;
+  if (!oa_active) {
+    Real qo = qshear*omega0;
+    Real coef1 = 2.0*bdt*omega0;
+    Real coef2 = 2.0*bdt*omega0;
+    Real coef3 = 2.0*bdt*omega0;
+    Real coef_strat = bdt*SQR(omega0);
+  } else {
+    Real qo = qshear*omega0;
     Real coef1 = 2.0*bdt*omega0;
     Real coef2 = (2.0-qshear)*bdt*omega0;
-    Real qo = qshear*omega0;
-    Real coef3 = bdt*SQR(omega0);
+    Real coef3 = (2.0-qshear)*bdt*omega0;
+    Real coef_strat = bdt*SQR(omega0);
+  }
+  // 3D or 2D r-phi source terms
+  if (shearing_box_r_phi || three_d_) {
     par_for("sbox", DevExeSpace(), 0, nmb1, ks, ke, js, je, is, ie,
     KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
       Real &den = w0(m,IDN,k,j,i);
       Real mom1 = den*w0(m,IVX,k,j,i);
       Real mom2 = den*w0(m,IVY,k,j,i);
+      if (!oa_active) {
+        Real &x1min = size.d_view(m).x1min;
+        Real &x1max = size.d_view(m).x1max;
+        int nx1 = indcs.nx1;
+        Real x1v = CellCenterX(i-is, nx1, x1min, x1max);
+        mom2 += den*+qo*x1v;
+      }
+
       u0(m,IM1,k,j,i) += coef1*mom2;
       u0(m,IM2,k,j,i) -= coef2*mom1;
       if (is_strat) {
@@ -53,7 +72,7 @@ void ShearingBoxCC::SourceTermsCC(const DvceArray5D<Real> &w0, const EOS_Data &e
         Real &x3max = size.d_view(m).x3max;
         int nx3 = indcs.nx3;
         Real x3v = CellCenterX(k-ks, nx3, x3min, x3max);
-        u0(m,IM3,k,j,i) -= coef3*den*x3v;
+        u0(m,IM3,k,j,i) -= coef_strat*den*x3v;
       }
       if (eos_data.is_ideal) {
         // For more accuracy, better to use flux values
@@ -63,14 +82,19 @@ void ShearingBoxCC::SourceTermsCC(const DvceArray5D<Real> &w0, const EOS_Data &e
 
   // 2D r-z source terms
   } else {
-    Real coef1 = 2.0*bdt*omega0;
-    Real coef3 = (2.0-qshear)*bdt*omega0;
-    Real qo = qshear*omega0;
     par_for("sbox", DevExeSpace(), 0, nmb1, ks, ke, js, je, is, ie,
     KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
       Real &den = w0(m,IDN,k,j,i);
       Real mom1 = den*w0(m,IVX,k,j,i);
       Real mom3 = den*w0(m,IVZ,k,j,i);
+      if (!oa_active) {
+        Real &x1min = size.d_view(m).x1min;
+        Real &x1max = size.d_view(m).x1max;
+        int nx1 = indcs.nx1;
+        Real x1v = CellCenterX(i-is, nx1, x1min, x1max);
+        mom3 += den*+qo*x1v;
+      }
+
       u0(m,IM1,k,j,i) += coef1*mom3;
       u0(m,IM3,k,j,i) -= coef3*mom1;
       if (eos_data.is_ideal) {
@@ -100,18 +124,37 @@ void ShearingBoxCC::SourceTermsCC(
   int nmb1 = pmy_pack->nmb_thispack - 1;
   auto three_d_ = pmy_pack->pmesh->three_d;
   auto is_strat = is_stratified;
+  auto oa_active = orbital_advection_active;
+
+  Real qo, coef1, coef2, coef3, coef_strat;
+  if (!oa_active) {
+    qo = qshear*omega0;
+    coef1 = 2.0*bdt*omega0;
+    coef2 = 2.0*bdt*omega0;
+    coef3 = 2.0*bdt*omega0;
+    coef_strat = bdt*SQR(omega0);
+  } else {
+    qo = qshear*omega0;
+    coef1 = 2.0*bdt*omega0;
+    coef2 = (2.0-qshear)*bdt*omega0;
+    coef3 = (2.0-qshear)*bdt*omega0;
+    coef_strat = bdt*SQR(omega0);
+  }
 
   // 3D or 2D r-phi source terms
   if (shearing_box_r_phi || three_d_) {
-    Real coef1 = 2.0*bdt*omega0;
-    Real coef2 = (2.0-qshear)*bdt*omega0;
-    Real qo = qshear*omega0;
-    Real coef3 = bdt*SQR(omega0);
     par_for("sbox", DevExeSpace(), 0, nmb1, ks, ke, js, je, is, ie,
     KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
       Real &den = w0(m,IDN,k,j,i);
       Real mom1 = den*w0(m,IVX,k,j,i);
       Real mom2 = den*w0(m,IVY,k,j,i);
+      if (!oa_active) {
+        Real &x1min = size.d_view(m).x1min;
+        Real &x1max = size.d_view(m).x1max;
+        int nx1 = indcs.nx1;
+        Real x1v = CellCenterX(i-is, nx1, x1min, x1max);
+        mom2 += den*+qo*x1v;
+      }
       u0(m,IM1,k,j,i) += coef1*mom2;
       u0(m,IM2,k,j,i) -= coef2*mom1;
       if (is_strat) {
@@ -119,7 +162,7 @@ void ShearingBoxCC::SourceTermsCC(
         Real &x3max = size.d_view(m).x3max;
         int nx3 = indcs.nx3;
         Real x3v = CellCenterX(k-ks, nx3, x3min, x3max);
-        u0(m,IM3,k,j,i) -= coef3*den*x3v;
+        u0(m,IM3,k,j,i) -= coef_strat*den*x3v;
       }
       if (eos_data.is_ideal) {
         // For more accuracy, better to use flux values
@@ -129,14 +172,18 @@ void ShearingBoxCC::SourceTermsCC(
 
   // 2D r-z source terms
   } else {
-    Real coef1 = 2.0*bdt*omega0;
-    Real coef3 = (2.0-qshear)*bdt*omega0;
-    Real qo = qshear*omega0;
     par_for("sbox", DevExeSpace(), 0, nmb1, ks, ke, js, je, is, ie,
     KOKKOS_LAMBDA(const int m, const int k, const int j, const int i) {
       Real &den = w0(m,IDN,k,j,i);
       Real mom1 = den*w0(m,IVX,k,j,i);
       Real mom3 = den*w0(m,IVZ,k,j,i);
+      if (!oa_active) {
+        Real &x1min = size.d_view(m).x1min;
+        Real &x1max = size.d_view(m).x1max;
+        int nx1 = indcs.nx1;
+        Real x1v = CellCenterX(i-is, nx1, x1min, x1max);
+        mom3 += den*+qo*x1v;
+      }
       u0(m,IM1,k,j,i) += coef1*mom3;
       u0(m,IM3,k,j,i) -= coef3*mom1;
       if (eos_data.is_ideal) {
