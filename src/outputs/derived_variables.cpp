@@ -53,6 +53,35 @@ void BaseTypeOutput::ComputeDerivedVariable(std::string name, Mesh *pm) {
   int &i_dv = out_params.i_derived;
   int &n_dv = out_params.n_derived;
 
+  // face-centered magnetic field - not including ghost zones
+  if (name.compare("mhd_bfc") == 0) {
+    Kokkos::realloc(derived_var, nmb, 3, n3, n2, n1);
+    auto dv = derived_var;
+    auto &b0_ = pm->pmb_pack->pmhd->b0;
+    par_for("bfc", DevExeSpace(), 0, (nmb-1), 0, (n3-1), 0, (n2-1), 0, (n1-1),
+    KOKKOS_LAMBDA(int m, int k, int j, int i) {
+      dv(m,0,k,j,i) = b0_.x1f(m,k,j,i);
+      dv(m,1,k,j,i) = b0_.x2f(m,k,j,i);
+      dv(m,2,k,j,i) = b0_.x3f(m,k,j,i);
+      // if (i == n1-1) {
+      //   dv(m,0,k,j,i+1) = b0_.x1f(m,k,j,i+1);
+      //   dv(m,1,k,j,i+1) = 0.0;
+      //   dv(m,2,k,j,i+1) = 0.0;
+      // }
+      // if (j == n2-1) {
+      //   dv(m,0,k,j+1,i) = 0.0;
+      //   dv(m,1,k,j+1,i) = b0_.x2f(m,k,j+1,i);
+      //   dv(m,2,k,j+1,i) = 0.0;
+      // }
+      // if (k == n3-1) {
+      //   dv(m,0,k+1,j,i) = 0.0;
+      //   dv(m,1,k+1,j,i) = 0.0;
+      //   dv(m,2,k+1,j,i) = b0_.x3f(m,k+1,j,i);
+      // }
+    });
+  }
+
+
   // temperature = pressure / density
   if (name.compare("temperature") == 0) {
     if (derived_var.extent(4) <= 1)
