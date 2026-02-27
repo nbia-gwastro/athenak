@@ -264,7 +264,9 @@ TaskStatus MHD::MHDSrcTerms(Driver *pdrive, int stage) {
   if (psrc->rel_cooling)  psrc->RelCooling(w0, peos->eos_data, beta_dt, u0);
 
   // Add shearing box source terms for CC MHD variables
-  if (psbox_u != nullptr) psbox_u->SourceTermsCC(w0, bcc0, peos->eos_data, beta_dt, u0);
+  if (psbox_u != nullptr){
+    psbox_u->SourceTermsCC(w0, bcc0, peos->eos_data, beta_dt, u0);
+  }
 
   // Add coordinate source terms in GR.  Again, must be computed with only primitives.
   if (pmy_pack->pcoord->is_general_relativistic &&
