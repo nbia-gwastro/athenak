@@ -24,8 +24,9 @@
 //! Note MHD function has same name but different argument list.
 //! Note: srcterms must be computed using primitive (w0) and NOT conserved (u0) vars
 
-void ShearingBoxCC::SourceTermsCC(const DvceArray5D<Real> &w0, const EOS_Data &eos_data,
-                                const Real bdt, DvceArray5D<Real> &u0) {
+void ShearingBoxCC::SourceTermsCC(
+    const DvceArray5D<Real> &w0, const EOS_Data &eos_data,
+    const Real bdt, DvceArray5D<Real> &u0) {
   auto &indcs = pmy_pack->pmesh->mb_indcs;
   auto &size = pmy_pack->pmb->mb_size;
   int is = indcs.is, ie = indcs.ie;
@@ -38,17 +39,17 @@ void ShearingBoxCC::SourceTermsCC(const DvceArray5D<Real> &w0, const EOS_Data &e
 
   Real qo, coef1, coef2, coef3, coef_strat;
   if (!oa_active) {
-    Real qo = qshear*omega0;
-    Real coef1 = 2.0*bdt*omega0;
-    Real coef2 = 2.0*bdt*omega0;
-    Real coef3 = 2.0*bdt*omega0;
-    Real coef_strat = bdt*SQR(omega0);
+    qo = qshear*omega0;
+    coef1 = 2.0*bdt*omega0;
+    coef2 = 2.0*bdt*omega0;
+    coef3 = 2.0*bdt*omega0;
+    coef_strat = bdt*SQR(omega0);
   } else {
-    Real qo = qshear*omega0;
-    Real coef1 = 2.0*bdt*omega0;
-    Real coef2 = (2.0-qshear)*bdt*omega0;
-    Real coef3 = (2.0-qshear)*bdt*omega0;
-    Real coef_strat = bdt*SQR(omega0);
+    qo = qshear*omega0;
+    coef1 = 2.0*bdt*omega0;
+    coef2 = (2.0-qshear)*bdt*omega0;
+    coef3 = (2.0-qshear)*bdt*omega0;
+    coef_strat = bdt*SQR(omega0);
   }
   // 3D or 2D r-phi source terms
   if (shearing_box_r_phi || three_d_) {
@@ -62,7 +63,7 @@ void ShearingBoxCC::SourceTermsCC(const DvceArray5D<Real> &w0, const EOS_Data &e
         Real &x1max = size.d_view(m).x1max;
         int nx1 = indcs.nx1;
         Real x1v = CellCenterX(i-is, nx1, x1min, x1max);
-        mom2 += den*+qo*x1v;
+        mom2 += den*qo*x1v;
       }
 
       u0(m,IM1,k,j,i) += coef1*mom2;
@@ -92,7 +93,7 @@ void ShearingBoxCC::SourceTermsCC(const DvceArray5D<Real> &w0, const EOS_Data &e
         Real &x1max = size.d_view(m).x1max;
         int nx1 = indcs.nx1;
         Real x1v = CellCenterX(i-is, nx1, x1min, x1max);
-        mom3 += den*+qo*x1v;
+        mom3 += den*qo*x1v;
       }
 
       u0(m,IM1,k,j,i) += coef1*mom3;
