@@ -22,7 +22,7 @@ Real AlphaSingle(Real z, Real y, Real x, Real z_bh, Real y_bh, Real x_bh, Real G
   Real dy = y - y_bh;
   Real dz = z - z_bh;
   Real dr = std::sqrt(dx*dx+dy*dy+dz*dz);
-  Real fac_ = 1/std::sqrt(std::pow(dr,-3)*GM + omega0**2);
+  Real fac_ = 1/std::sqrt(std::pow(dr,-3)*GM + omega0*omega0);
   return nu0*fac_;
 }
 
@@ -38,7 +38,7 @@ Real AlphaBinary(Real z, Real y, Real x, Real z_bh, Real y_bh, Real x_bh, Real G
   Real dz2 = z + z_bh;
   Real dr2 = std::sqrt(dx2*dx2+dy2*dy2+dz2*dz2);
   
-  Real fac_ = 1/std::sqrt(std::pow(dr1,-3)*GM/2 + std::pow(dr2,-3)*GM/2 + omega0**2);
+  Real fac_ = 1/std::sqrt(std::pow(dr1,-3)*GM/2 + std::pow(dr2,-3)*GM/2 + omega0*omega0);
   return nu0*fac_;
 }
 
