@@ -48,6 +48,25 @@ class IOWrapper {
   std::size_t Write_any_type_at_all(const void *buf, IOWrapperSizeT cnt,
                                     IOWrapperSizeT offset, std::string datatype,
                                     bool single_file_per_rank = false);
+  // Collective write of `count` elements (of `datatype`) from a CONTIGUOUS
+  // source buffer into scattered destinations in the file. Destinations are
+  // `ndisps` runs of `blocklength` elements, located at offsets
+  //   displacement + disps[i] * sizeof(datatype)
+  // in the file (i = 0..ndisps-1). Required: count == ndisps * blocklength on
+  // each rank.
+  //
+  // On MPI builds, internally builds an MPI_Type_create_indexed_block filetype,
+  // calls MPI_File_set_view + MPI_File_write_at_all, then resets the view to
+  // default. ALL ranks in the file's communicator must call this together;
+  // ranks with no data pass count=0, ndisps=0 (they still participate in the
+  // collective). Falls back to per-segment fseek+fwrite for non-MPI or
+  // single_file_per_rank builds (not collective there).
+  std::size_t Write_indexed_at_all(const void *buf, IOWrapperSizeT count,
+                                    std::string datatype,
+                                    IOWrapperSizeT displacement,
+                                    int blocklength,
+                                    const int *disps, int ndisps,
+                                    bool single_file_per_rank = false);
   std::size_t Read_Reals(void *buf, IOWrapperSizeT count,
                          bool single_file_per_rank = false);
   std::size_t Read_Reals_at(void *buf, IOWrapperSizeT count, IOWrapperSizeT offset,

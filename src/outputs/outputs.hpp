@@ -377,6 +377,59 @@ class MeshBinaryOutput : public BaseTypeOutput {
 };
 
 //----------------------------------------------------------------------------------------
+//! \class BoundaryFaceOutput
+//  \brief derived BaseTypeOutput class that dumps the first ghost-cell layer on a
+//   single physical face per output cadence into a self-contained per-snapshot
+//   BCTABLE-format file. A separate concatenator stitches the snapshots into a
+//   single time series file consumable by the BCTableReader-style problem
+//   generators. Assumes MHD and root-level boundary blocks only.
+
+class BoundaryFaceOutput : public BaseTypeOutput {
+ public:
+  BoundaryFaceOutput(ParameterInput *pin, Mesh *pm, OutputParameters oparams);
+  void LoadOutputData(Mesh *pm) override;
+  void WriteOutputFile(Mesh *pm, ParameterInput *pin) override;
+
+ private:
+  struct FaceBlock {
+    int      m_local;           // local meshblock index in this pack
+    uint32_t lx_a, lx_b;        // root-level lloc in the two perp dirs
+  };
+
+  void rebuild_face_blocks(Mesh *pm);
+
+  int face_id_{-1};            // 0..5 ix1,ox1,ix2,ox2,ix3,ox3
+  int dtype_code_{1};          // 1=float64, 2=float32
+  int elem_size_{8};
+  uint32_t N1_{0}, N2_{0};     // global face raster dims
+  uint32_t window_a_{0};       // per-block extent in faster perp dim (=nx_a+2*ng)
+  uint32_t window_b_{0};       // per-block extent in slower perp dim (=nx_b+2*ng)
+  int      cached_nmb_thispack_{-1};
+  // Last chunk-subdir we created on disk, to avoid an mkdir on every cadence.
+  // chunk = file_number / BCFACE_CHUNK_SIZE; -1 = none created yet.
+  int      last_chunk_dir_{-1};
+
+  std::vector<FaceBlock> face_blocks_;
+
+  // Device-side packing buffers. The kernel fills slab_d_ from u0/b0 once per
+  // cadence, then we mirror only this small array to host for the row writes.
+  // Sized to (nblocks, 7, window_b, window_a). Persistent across cadences;
+  // realloc'd only when nblocks changes.
+  DvceArray4D<Real>      slab_d_;
+  DvceArray1D<int>       m_local_d_;       // (nblocks,) device map b_idx -> m_local
+  HostArray1D<int>       m_local_h_;       // (nblocks,) host scratch for above
+  // File destination displacements for this rank's contribution, in oldtype
+  // units relative to the BCTABLE payload offset. One entry per (block,
+  // variable, slow-row); each entry points at the start of a window_a-long run.
+  // Stored in monotonically-non-decreasing order (required by MPI file views).
+  std::vector<int>       disps_;
+  // Sorted-and-permuted source buffer matching disps_ order. Sized to
+  // nblocks*nvar*window_b*window_a*elem_size_ bytes; reinterpret as float or
+  // double per dtype_code_. Avoids per-cadence allocation.
+  std::vector<char>      permuted_buf_;
+};
+
+//----------------------------------------------------------------------------------------
 //! \class RestartOutput
 //  \brief derived BaseTypeOutput class for restarts
 

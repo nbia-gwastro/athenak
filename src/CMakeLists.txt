@@ -91,6 +91,7 @@ add_executable(
         outputs/cartgrid.cpp
         outputs/derived_variables.cpp
         outputs/binary.cpp
+        outputs/boundary_face.cpp
         outputs/eventlog.cpp
         outputs/formatted_table.cpp
         outputs/history.cpp

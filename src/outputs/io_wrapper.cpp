@@ -480,6 +480,141 @@ std::size_t IOWrapper::Write_any_type_at(const void *buf, IOWrapperSizeT cnt,
 }
 
 //----------------------------------------------------------------------------------------
+//! \fn IOWrapper::Write_indexed_at_all()
+//! \brief Collective scattered write. Source buffer is contiguous (`count`
+//! elements of `datatype`); destinations are `ndisps` runs of `blocklength`
+//! elements at file positions `displacement + disps[i] * sizeof(datatype)`.
+//! Internally: MPI_Type_create_indexed_block + MPI_File_set_view +
+//! MPI_File_write_at_all + reset_view. Collective over the file's
+//! communicator. Ranks with no data pass count=0, ndisps=0 and participate
+//! with a no-op filetype. Returns number of elements written.
+
+std::size_t IOWrapper::Write_indexed_at_all(const void *buf, IOWrapperSizeT count,
+                                              std::string datatype,
+                                              IOWrapperSizeT displacement,
+                                              int blocklength,
+                                              const int *disps, int ndisps,
+                                              bool single_file_per_rank) {
+  // Resolve element size (used by the non-MPI fallback's stride math).
+  std::size_t datasize;
+  if      (datatype.compare("byte")   == 0) {datasize = sizeof(char);}
+  else if (datatype.compare("int")    == 0) {datasize = sizeof(int);}
+  else if (datatype.compare("float")  == 0) {datasize = sizeof(float);}
+  else if (datatype.compare("double") == 0) {datasize = sizeof(double);}
+  else if (datatype.compare("Real")   == 0) {datasize = sizeof(Real);}
+  else {
+    std::cout << "### FATAL ERROR in " << __FILE__ << " at line " << __LINE__
+              << std::endl << "Unrecognized datatype '" << datatype << "'" << std::endl;
+    std::exit(EXIT_FAILURE);
+  }
+
+#if MPI_PARALLEL_ENABLED
+  if (!single_file_per_rank) {
+    // Map the AthenaK datatype string to an MPI datatype.
+    MPI_Datatype mpitype;
+    if      (datatype.compare("byte")   == 0) {mpitype = MPI_BYTE;}
+    else if (datatype.compare("int")    == 0) {mpitype = MPI_INT;}
+    else if (datatype.compare("float")  == 0) {mpitype = MPI_FLOAT;}
+    else if (datatype.compare("double") == 0) {mpitype = MPI_DOUBLE;}
+    else if (datatype.compare("Real")   == 0) {mpitype = MPI_ATHENA_REAL;}
+    else {
+      MPI_Abort(MPI_COMM_WORLD, 1);
+      std::cout << "### FATAL ERROR in " << __FILE__ << " at line " << __LINE__
+                << std::endl << "Unrecognized datatype '" << datatype << "'" << std::endl;
+      std::exit(EXIT_FAILURE);
+    }
+
+    // Build the per-rank filetype. For ranks with no data we use the etype
+    // directly (mpitype) — this is a predefined MPI datatype, no commit / free
+    // needed, and Open MPI/ROMIO rejects the zero-length-contiguous trick.
+    // The set_view + write_at_all with count=0 then becomes a clean no-op for
+    // non-boundary ranks while still participating in the collective.
+    MPI_Datatype filetype;
+    bool filetype_owned = false;   // true if we have to MPI_Type_free at the end
+    if (ndisps > 0) {
+      MPI_Type_create_indexed_block(ndisps, blocklength,
+                                     const_cast<int*>(disps),
+                                     mpitype, &filetype);
+      MPI_Type_commit(&filetype);
+      filetype_owned = true;
+    } else {
+      filetype = mpitype;
+    }
+
+    // set_view is collective; every rank must call (etype must match across
+    // ranks; filetype and displacement may differ). Any failure here means the
+    // collective is broken — abort loudly rather than silently corrupting data.
+    int errcode = MPI_File_set_view(fh_, (MPI_Offset)displacement,
+                                     mpitype, filetype,
+                                     const_cast<char*>("native"), MPI_INFO_NULL);
+    if (errcode != MPI_SUCCESS) {
+      char msg[MPI_MAX_ERROR_STRING]; int resultlen;
+      MPI_Error_string(errcode, msg, &resultlen);
+      std::cerr << "### FATAL ERROR in IOWrapper::Write_indexed_at_all: "
+                << "MPI_File_set_view failed (ndisps=" << ndisps
+                << ", count=" << count << "): " << std::string(msg, resultlen)
+                << std::endl;
+      if (filetype_owned) MPI_Type_free(&filetype);
+      MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+
+    // Collective write: each rank writes its contiguous `count` elements,
+    // scattered into the file via its filetype.
+    MPI_Status status;
+    errcode = MPI_File_write_at_all(fh_, 0, buf, (int)count, mpitype, &status);
+    if (errcode != MPI_SUCCESS) {
+      char msg[MPI_MAX_ERROR_STRING]; int resultlen;
+      MPI_Error_string(errcode, msg, &resultlen);
+      std::cerr << "### FATAL ERROR in IOWrapper::Write_indexed_at_all: "
+                << "MPI_File_write_at_all failed: "
+                << std::string(msg, resultlen) << std::endl;
+      if (filetype_owned) MPI_Type_free(&filetype);
+      MPI_Abort(MPI_COMM_WORLD, 1);
+    }
+
+    // Reset the file view to default so subsequent ops (e.g. Close) behave
+    // normally. Also collective.
+    MPI_File_set_view(fh_, 0, MPI_BYTE, MPI_BYTE,
+                       const_cast<char*>("native"), MPI_INFO_NULL);
+
+    if (filetype_owned) MPI_Type_free(&filetype);
+
+    int nwrite;
+    if (MPI_Get_count(&status, mpitype, &nwrite) == MPI_UNDEFINED) {return 0;}
+    return static_cast<std::size_t>(nwrite);
+  }
+#endif
+
+  // Fallback: per-segment fseek+fwrite. Used for non-MPI builds and
+  // single_file_per_rank. NOT collective.
+#if MPI_PARALLEL_ENABLED
+  FILE *fp = reinterpret_cast<FILE*>(fh_);
+#else
+  FILE *fp = fh_;
+#endif
+  const char *src = static_cast<const char*>(buf);
+  const std::size_t blocklen_b = static_cast<std::size_t>(blocklength) * datasize;
+  std::size_t total_elems = 0;
+  for (int i = 0; i < ndisps; ++i) {
+    const std::size_t off =
+        static_cast<std::size_t>(displacement)
+        + static_cast<std::size_t>(disps[i]) * datasize;
+    std::fseek(fp, static_cast<long>(off), SEEK_SET);
+    std::size_t n = std::fwrite(src + static_cast<std::size_t>(i) * blocklen_b,
+                                 datasize,
+                                 static_cast<std::size_t>(blocklength), fp);
+    if (n != static_cast<std::size_t>(blocklength)) {
+      std::cerr << "Error in Write_indexed_at_all: segment " << i
+                << " wrote " << n << " of " << blocklength << " elements"
+                << std::endl;
+      return total_elems;
+    }
+    total_elems += n;
+  }
+  return total_elems;
+}
+
+//----------------------------------------------------------------------------------------
 //! \fn int IOWrapper::Write_any_type_at_all()
 //! \brief wrapper for {MPI_File_write_at_all} versus {std::fseek+std::fwrite} for writing
 //! any type of data, specified by the datatype argument.
